@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -87,7 +88,86 @@ type protocolServer struct {
 	seqAhead        uint64               // pretend the server stored this seq
 	ignoreUnknown   map[string]bool      // datasets answered as ignored
 
+	// Commands, following the spec's lifecycle.
+	commands       []Command
+	commandStates  map[string]string // pending, delivered, acknowledged, succeeded, failed
+	commandResults map[string][]CommandResult
+	requests       []string // every request path, in order
+
 	events chan string
+}
+
+// addCommand queues a pending command.
+func (server *protocolServer) addCommand(id, kind, args string) {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	now := time.Now().UTC().Truncate(time.Second)
+	server.commands = append(server.commands, Command{ID: id, Kind: kind, Args: json.RawMessage(args), CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour)})
+	server.commandStates[id] = "pending"
+}
+
+func (server *protocolServer) commandState(id string) string {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	return server.commandStates[id]
+}
+
+func (server *protocolServer) resultsOf(id string) []CommandResult {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	return append([]CommandResult(nil), server.commandResults[id]...)
+}
+
+func (server *protocolServer) requestLog() []string {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	return append([]string(nil), server.requests...)
+}
+
+// handleCommands implements GET /commands, ack and result.
+func (server *protocolServer) handleCommands(writer http.ResponseWriter, request *http.Request, path string, body []byte) {
+	if path == "/commands" {
+		listed := []Command{}
+		for _, command := range server.commands {
+			if state := server.commandStates[command.ID]; (state == "pending" || state == "delivered") && len(listed) < MaximumCommands {
+				listed = append(listed, command)
+				server.commandStates[command.ID] = "delivered"
+			}
+		}
+		encoded, _ := json.Marshal(CommandsResponse{Commands: listed})
+		writeJSONResponse(writer, 200, string(encoded))
+		return
+	}
+	rest := strings.TrimPrefix(path, "/commands/")
+	id, action, _ := strings.Cut(rest, "/")
+	state, known := server.commandStates[id]
+	if !known || request.Method != http.MethodPost {
+		writeJSONResponse(writer, 404, `{"type":"not_found","status":404,"title":"Not found"}`)
+		return
+	}
+	switch action {
+	case "ack":
+		if len(body) != 0 {
+			server.t.Errorf("ack %s has a body: %s", id, body)
+		}
+		if state == "pending" || state == "delivered" {
+			server.commandStates[id] = "acknowledged"
+		}
+	case "result":
+		var result CommandResult
+		if err := json.Unmarshal(body, &result); err != nil {
+			writeJSONResponse(writer, 422, `{"type":"validation_failed","status":422,"title":"bad"}`)
+			return
+		}
+		server.commandResults[id] = append(server.commandResults[id], result)
+		if state != "succeeded" && state != "failed" {
+			server.commandStates[id] = result.Status
+		}
+	default:
+		writeJSONResponse(writer, 404, `{"type":"not_found","status":404,"title":"Not found"}`)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 type failure struct {
@@ -106,6 +186,9 @@ func newProtocolServer(t *testing.T) *protocolServer {
 		wrongHash: map[string]bool{},
 		config:    DefaultServerConfig(),
 		events:    make(chan string, 100),
+
+		commandStates:  map[string]string{},
+		commandResults: map[string][]CommandResult{},
 	}
 	server.config.ETag = `"c1"`
 	server.server = httptest.NewServer(http.HandlerFunc(server.handle))
@@ -136,6 +219,7 @@ func (server *protocolServer) handle(writer http.ResponseWriter, request *http.R
 	}
 
 	server.mu.Lock()
+	server.requests = append(server.requests, path)
 	defer func() {
 		server.mu.Unlock()
 		select {
@@ -167,7 +251,11 @@ func (server *protocolServer) handle(writer http.ResponseWriter, request *http.R
 		resync = append(resync, server.heartbeatResync...)
 		server.heartbeatResync = nil
 		slices.Sort(resync)
-		encoded, _ := json.Marshal(HeartbeatResponse{Resync: slices.Compact(resync), ConfigETag: server.config.ETag})
+		available := false
+		for _, state := range server.commandStates {
+			available = available || state == "pending" || state == "delivered"
+		}
+		encoded, _ := json.Marshal(HeartbeatResponse{Resync: slices.Compact(resync), ConfigETag: server.config.ETag, CommandsAvailable: available})
 		writeJSONResponse(writer, 200, string(encoded))
 	case "/config":
 		server.configs = append(server.configs, request.Header.Get("If-None-Match"))
@@ -181,7 +269,13 @@ func (server *protocolServer) handle(writer http.ResponseWriter, request *http.R
 		server.inventory(writer, body)
 	case "/broadcasting/auth":
 		writeJSONResponse(writer, 200, `{"auth":"key:signature"}`)
+	case "/commands":
+		server.handleCommands(writer, request, path, body)
 	default:
+		if strings.HasPrefix(path, "/commands/") {
+			server.handleCommands(writer, request, path, body)
+			return
+		}
 		writeJSONResponse(writer, 404, `{"type":"not_found","status":404,"title":"Not found"}`)
 	}
 }
@@ -754,10 +848,19 @@ func TestRunHeartbeatsFetchesConfigAndReactsToRealtime(t *testing.T) {
 		t.Fatalf("authorize = %q, %v", auth, err)
 	}
 
-	// inventory.requested collects everything now; only changes go out.
+	// commands.available fetches the commands right away; the
+	// refresh_inventory command collects everything and only changes go
+	// out, then its result is reported.
+	server.addCommand("01jb9a2c3d4e5f6g7h8j9k0m1n", CommandRefreshInventory, `{"datasets":null}`)
 	system.set("changed", nil)
-	realtime.onEvent(EventInventoryRequested)
+	realtime.onEvent(EventCommandsAvailable)
+	waitFor("/commands")
+	waitFor("/commands/01jb9a2c3d4e5f6g7h8j9k0m1n/ack")
 	waitFor("/inventory")
+	waitFor("/commands/01jb9a2c3d4e5f6g7h8j9k0m1n/result")
+	if results := server.resultsOf("01jb9a2c3d4e5f6g7h8j9k0m1n"); len(results) != 1 || results[0].Status != CommandSucceeded {
+		t.Fatalf("results = %+v", results)
+	}
 
 	// config.updated fetches the config (304 now).
 	realtime.onEvent(EventConfigUpdated)

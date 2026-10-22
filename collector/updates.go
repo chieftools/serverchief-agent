@@ -27,9 +27,12 @@ type UpdatesInfo struct {
 	// RebootRequired is null when the host cannot tell (RHEL without
 	// needs-restarting).
 	RebootRequired *bool `json:"reboot_required"`
-	// CacheAgeSeconds is the age of the package metadata the result is
-	// based on; null when there is no cache. The agent never refreshes it.
-	CacheAgeSeconds *int64 `json:"cache_age_seconds"`
+	// CacheUpdatedAt is when the package metadata the result is based on
+	// was last refreshed (UTC, whole seconds); null when there is no cache
+	// or it cannot be told. The agent never refreshes the cache itself. It
+	// is a timestamp rather than an age, so the dataset's hash only changes
+	// when the cache does.
+	CacheUpdatedAt *time.Time `json:"cache_updated_at"`
 }
 
 // Update is one pending package upgrade.
@@ -61,10 +64,24 @@ func NewUpdates(host *Host) *Updates { return &Updates{host: host} }
 
 func (*Updates) Name() string { return "updates" }
 
-// ChangeToken implements ChangeDetector: installing or upgrading packages
-// changes what is pending.
+// ChangeToken implements ChangeDetector: installing or upgrading packages,
+// and refreshing the metadata cache, change what is pending.
 func (collector *Updates) ChangeToken() string {
-	return collector.host.packageDatabaseToken()
+	host := collector.host
+	token := host.packageDatabaseToken()
+	var cache *time.Time
+	switch {
+	case host.exists(dpkgStatusPath):
+		cache = host.aptCacheUpdatedAt()
+	case host.isDir("/var/cache/dnf"):
+		cache = host.rpmCacheUpdatedAt(ManagerDnf)
+	case host.isDir("/var/cache/yum"):
+		cache = host.rpmCacheUpdatedAt(ManagerYum)
+	}
+	if cache != nil {
+		token += "|cache@" + cache.Format(time.RFC3339)
+	}
+	return token
 }
 
 func (collector *Updates) Collect(ctx context.Context) (any, error) {
@@ -115,7 +132,7 @@ func (host *Host) aptUpdates(ctx context.Context) (*UpdatesInfo, error) {
 	info := &UpdatesInfo{Manager: ManagerApt, Items: parseAptSimulation(result.Stdout)}
 	required := host.exists("/var/run/reboot-required") || host.exists("/run/reboot-required")
 	info.RebootRequired = &required
-	info.CacheAgeSeconds = host.aptCacheAge()
+	info.CacheUpdatedAt = host.aptCacheUpdatedAt()
 	return info, nil
 }
 
@@ -153,21 +170,52 @@ func aptSecurityOrigin(origins string) bool {
 	return false
 }
 
-// aptCacheAge uses the update-notifier stamp when present, otherwise the
-// lists directory, whose partial/ subdirectory changes on every update.
-func (host *Host) aptCacheAge() *int64 {
-	entries, err := host.readDir("/var/lib/apt/lists")
+// aptStamps are touched only after a successful apt-get update: by
+// apt.systemd.daily (APT::Periodic) and by Ubuntu's update-notifier hook
+// (APT::Update::Post-Invoke-Success).
+var aptStamps = []string{
+	"/var/lib/apt/periodic/update-success-stamp",
+	"/var/lib/apt/periodic/update-stamp",
+}
+
+// aptCacheUpdatedAt is the newest of the success stamps, the lists
+// directory and its Release/InRelease files, or nil without package
+// indexes.
+//
+// Measured on Ubuntu 14.04, 16.04 and 24.04: apt sets a downloaded file's
+// mtime to the archive's Last-Modified, so Release files only give a lower
+// bound. The lists directory changes whenever an update replaces an index
+// (on 14.04 on every successful update). lists/partial is not used: it
+// also changes on failed updates, so it would claim metadata that apt
+// never got. Our own apt-get -s simulation touches none of these.
+func (host *Host) aptCacheUpdatedAt() *time.Time {
+	const lists = "/var/lib/apt/lists"
+	entries, err := host.readDir(lists)
 	if err != nil {
 		return nil
 	}
-	hasIndexes := slices.ContainsFunc(entries, func(entry fs.DirEntry) bool {
+	hasIndexes := false
+	var newest time.Time
+	for _, entry := range entries {
 		name := entry.Name()
-		return strings.Contains(name, "_Packages") || strings.HasSuffix(name, "Release")
-	})
+		if strings.Contains(name, "_Packages") {
+			hasIndexes = true
+		}
+		if !strings.HasSuffix(name, "_Release") && !strings.HasSuffix(name, "_InRelease") {
+			continue
+		}
+		hasIndexes = true
+		if info, err := entry.Info(); err == nil && info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+	}
 	if !hasIndexes {
 		return nil
 	}
-	return host.ageOf(host.newestModTime("/var/lib/apt/periodic/update-success-stamp", "/var/lib/apt/lists", "/var/lib/apt/lists/partial"))
+	if stamp := host.newestModTime(append([]string{lists}, aptStamps...)...); stamp.After(newest) {
+		newest = stamp
+	}
+	return timestamp(newest)
 }
 
 // rpmUpdates lists pending updates from yum or dnf with -C (cache only), so
@@ -207,7 +255,7 @@ func (host *Host) rpmUpdates(ctx context.Context, manager string) (*UpdatesInfo,
 		info.Items = append(info.Items, available)
 	}
 	info.RebootRequired = host.needsRestarting(ctx)
-	info.CacheAgeSeconds = host.rpmCacheAge(manager)
+	info.CacheUpdatedAt = host.rpmCacheUpdatedAt(manager)
 	return info, nil
 }
 
@@ -313,30 +361,42 @@ func (host *Host) needsRestarting(ctx context.Context) *bool {
 	}
 }
 
-// rpmCacheAge is the age of the newest repomd.xml (and yum's cachecookie)
-// in the manager's cache directory.
-func (host *Host) rpmCacheAge(manager string) *int64 {
-	root := relative("/var/cache/" + manager)
+// rpmCacheUpdatedAt is the newest metadata timestamp in the manager's
+// cache directory: repomd.xml, yum's per-repository cachecookie (touched on
+// every metadata check) and dnf's primary metadata, whose mtime libdnf
+// resets on every check that finds the metadata current (it is what dnf
+// shows as "Last metadata expiration check"). Directory mtimes are not
+// used: `dnf -C`, which the collector runs, writes to the cache directory.
+func (host *Host) rpmCacheUpdatedAt(manager string) *time.Time {
+	directories := []string{"/var/cache/" + manager}
+	if manager == ManagerDnf {
+		directories = append(directories, "/var/cache/libdnf5")
+	}
 	var newest time.Time
-	_ = fs.WalkDir(host.FS, root, func(name string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if entry.IsDir() {
-			if strings.Count(strings.TrimPrefix(name, root), "/") > 4 {
-				return fs.SkipDir
+	for _, directory := range directories {
+		root := relative(directory)
+		_ = fs.WalkDir(host.FS, root, func(name string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if entry.IsDir() {
+				if strings.Count(strings.TrimPrefix(name, root), "/") > 4 {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			base := path.Base(name)
+			primary := path.Base(path.Dir(name)) == "repodata" && strings.Contains(base, "primary.xml")
+			if base != "repomd.xml" && base != "cachecookie" && !primary {
+				return nil
+			}
+			if info, err := entry.Info(); err == nil && info.ModTime().After(newest) {
+				newest = info.ModTime()
 			}
 			return nil
-		}
-		if base := path.Base(name); base != "repomd.xml" && base != "cachecookie" {
-			return nil
-		}
-		if info, err := entry.Info(); err == nil && info.ModTime().After(newest) {
-			newest = info.ModTime()
-		}
-		return nil
-	})
-	return host.ageOf(newest)
+		})
+	}
+	return timestamp(newest)
 }
 
 func (host *Host) newestModTime(names ...string) time.Time {
@@ -349,12 +409,14 @@ func (host *Host) newestModTime(names ...string) time.Time {
 	return newest
 }
 
-func (host *Host) ageOf(at time.Time) *int64 {
+// timestamp returns at in UTC, truncated to whole seconds, or nil when it
+// is zero.
+func timestamp(at time.Time) *time.Time {
 	if at.IsZero() {
 		return nil
 	}
-	age := max(int64(host.now().Sub(at)/time.Second), 0)
-	return &age
+	at = at.UTC().Truncate(time.Second)
+	return &at
 }
 
 func lastLine(data []byte) string {

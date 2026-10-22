@@ -8,3 +8,5 @@
 /serverchief-*.rpm
 /serverchief_*.tar.gz
 /SHA256SUMS
+
+/.dev-agent

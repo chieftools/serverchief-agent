@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"time"
 )
@@ -43,6 +44,9 @@ type Paths struct {
 	// Payloads keeps the last acknowledged payload of delta datasets, the
 	// base their next delta is computed against.
 	Payloads string
+	// Commands journals recently received commands, so a restart neither
+	// executes one twice nor loses its result.
+	Commands string
 	// Log is the file log used on hosts without journald.
 	Log string
 }
@@ -56,6 +60,7 @@ func DefaultPaths() Paths {
 		State:        "/var/lib/serverchief/state.json",
 		ServerConfig: "/var/lib/serverchief/server-config.json",
 		Payloads:     "/var/lib/serverchief/payloads",
+		Commands:     "/var/lib/serverchief/commands.json",
 		Log:          "/var/log/serverchief/agent.log",
 	}
 }
@@ -66,6 +71,7 @@ func (paths Paths) WithStateDirectory(directory string) Paths {
 	paths.State = filepath.Join(directory, "state.json")
 	paths.ServerConfig = filepath.Join(directory, "server-config.json")
 	paths.Payloads = filepath.Join(directory, "payloads")
+	paths.Commands = filepath.Join(directory, "commands.json")
 	return paths
 }
 
@@ -177,9 +183,53 @@ type HeartbeatRequest struct {
 
 // HeartbeatResponse is the answer to POST /heartbeat.
 type HeartbeatResponse struct {
-	Resync            []string `json:"resync"`
-	ConfigETag        string   `json:"config_etag"`
-	CommandsAvailable bool     `json:"commands_available"`
+	Resync     []string `json:"resync"`
+	ConfigETag string   `json:"config_etag"`
+	// CommandsAvailable makes the agent call GET /commands right away.
+	CommandsAvailable bool `json:"commands_available"`
+}
+
+// Command kinds. Kinds are a closed list; there is no shell execution.
+const (
+	// CommandRefreshInventory collects {"datasets": [names] | null} now
+	// and pushes what changed.
+	CommandRefreshInventory = "refresh_inventory"
+	// CommandResync sends {"datasets": [names] | null} in full now.
+	CommandResync = "resync"
+	// CommandRefreshConfig fetches GET /config now.
+	CommandRefreshConfig = "refresh_config"
+)
+
+// Command result statuses.
+const (
+	CommandSucceeded = "succeeded"
+	CommandFailed    = "failed"
+)
+
+// MaximumCommands is the most commands GET /commands returns at once.
+const MaximumCommands = 20
+
+// CommandsResponse is the answer to GET /commands
+// (fixtures/commands-response.json), oldest first.
+type CommandsResponse struct {
+	Commands []Command `json:"commands"`
+}
+
+// Command is one entry of GET /commands.
+type Command struct {
+	ID        string          `json:"id"`
+	Kind      string          `json:"kind"`
+	Args      json.RawMessage `json:"args"`
+	CreatedAt time.Time       `json:"created_at"`
+	ExpiresAt time.Time       `json:"expires_at"`
+}
+
+// CommandResult is the body of POST /commands/{id}/result
+// (fixtures/command-result-request.json). The first result wins.
+type CommandResult struct {
+	Status     string    `json:"status"`
+	Detail     *string   `json:"detail"`
+	FinishedAt time.Time `json:"finished_at"`
 }
 
 // InventoryResponse is the answer to POST /inventory

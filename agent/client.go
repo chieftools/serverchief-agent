@@ -35,6 +35,12 @@ type Client interface {
 	FetchConfig(ctx context.Context, etag string) (ConfigResult, error)
 	// AuthorizeChannel signs a realtime subscription.
 	AuthorizeChannel(ctx context.Context, authEndpoint, socketID, channel string) (string, error)
+	// FetchCommands returns the pending and unacknowledged commands.
+	FetchCommands(ctx context.Context) ([]Command, error)
+	// AckCommand acknowledges a command before it is executed.
+	AckCommand(ctx context.Context, id string) error
+	// ReportCommandResult reports how a command ended.
+	ReportCommandResult(ctx context.Context, id string, result CommandResult) error
 }
 
 // ConfigResult is the answer to GET /config.
@@ -130,6 +136,32 @@ func (client *HTTPClient) FetchConfig(ctx context.Context, etag string) (ConfigR
 		config.ETag = response.Header.Get("ETag")
 	}
 	return ConfigResult{Config: config}, nil
+}
+
+// FetchCommands calls GET /commands.
+func (client *HTTPClient) FetchCommands(ctx context.Context) ([]Command, error) {
+	var response CommandsResponse
+	if _, err := client.do(ctx, http.MethodGet, "/commands", true, nil, nil, &response); err != nil {
+		return nil, err
+	}
+	for _, command := range response.Commands {
+		if command.ID == "" || command.Kind == "" {
+			return nil, errors.New("commands response has a command without id or kind")
+		}
+	}
+	return response.Commands, nil
+}
+
+// AckCommand calls POST /commands/{id}/ack with an empty body.
+func (client *HTTPClient) AckCommand(ctx context.Context, id string) error {
+	_, err := client.do(ctx, http.MethodPost, "/commands/"+url.PathEscape(id)+"/ack", true, nil, nil, nil)
+	return err
+}
+
+// ReportCommandResult calls POST /commands/{id}/result.
+func (client *HTTPClient) ReportCommandResult(ctx context.Context, id string, result CommandResult) error {
+	_, err := client.do(ctx, http.MethodPost, "/commands/"+url.PathEscape(id)+"/result", true, result, nil, nil)
+	return err
 }
 
 // AuthorizeChannel calls the broadcasting auth endpoint with the form

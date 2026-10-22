@@ -3,11 +3,14 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"go.chief.tools/serverchief-agent/inventory"
 )
 
 func collectUpdates(t *testing.T, host *Host) *UpdatesInfo {
@@ -49,8 +52,8 @@ func TestAptUpdatesUbuntu1604(t *testing.T) {
 	if info.RebootRequired == nil || !*info.RebootRequired {
 		t.Fatal("/var/run/reboot-required not detected")
 	}
-	if info.CacheAgeSeconds == nil || *info.CacheAgeSeconds != 3600 {
-		t.Fatalf("cache age = %v", info.CacheAgeSeconds)
+	if want := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC); info.CacheUpdatedAt == nil || !info.CacheUpdatedAt.Equal(want) {
+		t.Fatalf("cache updated at = %v", info.CacheUpdatedAt)
 	}
 	for _, command := range *ran {
 		if strings.Contains(command, "update") && !strings.Contains(command, "dist-upgrade") {
@@ -63,10 +66,10 @@ func TestAptUpdatesDebian12(t *testing.T) {
 	files := map[string]string{"var/lib/dpkg/status": "@var/lib/dpkg/status", "bin/apt-get": ""}
 	host, _ := fakeHost(t, "debian-12", files, map[string]fakeCommand{"apt-get -s": {file: "apt-get-dist-upgrade-current.txt"}})
 	info := collectUpdates(t, host)
-	if len(info.Items) != 0 || info.SecurityCount != 0 || info.RebootRequired == nil || *info.RebootRequired || info.CacheAgeSeconds != nil {
+	if len(info.Items) != 0 || info.SecurityCount != 0 || info.RebootRequired == nil || *info.RebootRequired || info.CacheUpdatedAt != nil {
 		t.Fatalf("up-to-date debian:12 = %+v", info)
 	}
-	if encoded, _ := json.Marshal(info); string(encoded) != `{"manager":"apt","items":[],"security_count":0,"reboot_required":false,"cache_age_seconds":null}` {
+	if encoded, _ := json.Marshal(info); string(encoded) != `{"manager":"apt","items":[],"security_count":0,"reboot_required":false,"cache_updated_at":null}` {
 		t.Fatalf("encoded = %s", encoded)
 	}
 
@@ -128,8 +131,8 @@ func TestYumUpdatesCentOS7(t *testing.T) {
 	if info.RebootRequired == nil || *info.RebootRequired {
 		t.Fatalf("reboot required = %v", info.RebootRequired)
 	}
-	if info.CacheAgeSeconds == nil || *info.CacheAgeSeconds != 3600 {
-		t.Fatalf("cache age = %v", info.CacheAgeSeconds)
+	if want := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC); info.CacheUpdatedAt == nil || !info.CacheUpdatedAt.Equal(want) {
+		t.Fatalf("cache updated at = %v", info.CacheUpdatedAt)
 	}
 	for _, item := range info.Items {
 		if item.CurrentVersion == "" {
@@ -169,6 +172,9 @@ func TestDnfUpdatesAlmaLinux9(t *testing.T) {
 	}
 	if info.RebootRequired == nil || !*info.RebootRequired {
 		t.Fatal("needs-restarting exit 1 not reported")
+	}
+	if info.CacheUpdatedAt == nil || info.CacheUpdatedAt.Format(time.RFC3339) != "2026-10-22T12:00:00Z" {
+		t.Fatalf("cache updated at = %v", info.CacheUpdatedAt)
 	}
 
 	// Without a metadata cache dnf -C fails; the agent reports it rather
@@ -215,5 +221,109 @@ func TestUpdatesWithoutManagerOrNeedsRestarting(t *testing.T) {
 	host = &Host{FS: fstest.MapFS{}, Now: time.Now}
 	if host.needsRestarting(context.Background()) != nil {
 		t.Fatal("needs-restarting result without the tool")
+	}
+}
+
+// aptCacheHost is an apt host whose cache files have distinct mtimes.
+func aptCacheHost(now time.Time, files map[string]time.Time) *Host {
+	fsys := fstest.MapFS{"var/lib/dpkg/status": {}, "usr/bin/apt-get": {}}
+	for name, modTime := range files {
+		mode := fs.FileMode(0o644)
+		if strings.HasSuffix(name, "/") {
+			name, mode = strings.TrimSuffix(name, "/"), fs.ModeDir|0o755
+		}
+		fsys[name] = &fstest.MapFile{ModTime: modTime, Mode: mode}
+	}
+	return &Host{
+		FS:  fsys,
+		Now: func() time.Time { return now },
+		Command: func(context.Context, string, ...string) (CommandResult, error) {
+			return CommandResult{Stdout: []byte("Inst libc6 [2.23-0ubuntu11] (2.23-0ubuntu11.3 Ubuntu:16.04/xenial-security [amd64])\n")}, nil
+		},
+	}
+}
+
+func TestAptCacheUpdatedAt(t *testing.T) {
+	at := func(hour, minute int) time.Time {
+		return time.Date(2026, 10, 22, hour, minute, 0, 0, time.FixedZone("CEST", 2*3600))
+	}
+	files := map[string]time.Time{
+		"var/lib/apt/lists/": at(9, 0),
+		"var/lib/apt/lists/archive.ubuntu.com_ubuntu_dists_xenial_InRelease":                           at(8, 0),
+		"var/lib/apt/lists/archive.ubuntu.com_ubuntu_dists_xenial-security_InRelease":                  at(10, 30),
+		"var/lib/apt/lists/archive.ubuntu.com_ubuntu_dists_xenial-security_main_binary-amd64_Packages": at(23, 0),
+		// partial/ also moves on failed updates and is ignored.
+		"var/lib/apt/lists/partial/": at(23, 30),
+	}
+	info := collectUpdates(t, aptCacheHost(at(23, 59), files))
+	if info.CacheUpdatedAt == nil || info.CacheUpdatedAt.Format(time.RFC3339) != "2026-10-22T08:30:00Z" {
+		t.Fatalf("newest Release file: cache updated at = %v", info.CacheUpdatedAt)
+	}
+
+	// A success stamp newer than the indexes wins: an update that found
+	// nothing new leaves the lists alone.
+	files["var/lib/apt/periodic/update-success-stamp"] = at(11, 15)
+	info = collectUpdates(t, aptCacheHost(at(23, 59), files))
+	if info.CacheUpdatedAt == nil || info.CacheUpdatedAt.Format(time.RFC3339) != "2026-10-22T09:15:00Z" {
+		t.Fatalf("success stamp: cache updated at = %v", info.CacheUpdatedAt)
+	}
+
+	// Without indexes there is no cache, whatever the stamps say.
+	empty := map[string]time.Time{"var/lib/apt/lists/": at(9, 0), "var/lib/apt/lists/lock": at(9, 0), "var/lib/apt/periodic/update-success-stamp": at(11, 15)}
+	if info = collectUpdates(t, aptCacheHost(at(23, 59), empty)); info.CacheUpdatedAt != nil {
+		t.Fatalf("no indexes: cache updated at = %v", info.CacheUpdatedAt)
+	}
+}
+
+// TestUpdatesHashStable collects twice, an hour apart, with an unchanged
+// cache: the hash must not move. Only a refreshed cache changes it.
+func TestUpdatesHashStable(t *testing.T) {
+	files := map[string]time.Time{
+		"var/lib/apt/lists/archive.ubuntu.com_ubuntu_dists_xenial_InRelease": time.Date(2026, 10, 22, 8, 0, 0, 123456789, time.UTC),
+	}
+	hash := func(now time.Time) string {
+		t.Helper()
+		dataset, err := inventory.NewDataset("updates", collectUpdates(t, aptCacheHost(now, files)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dataset.Hash
+	}
+	first := hash(time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC))
+	if second := hash(time.Date(2026, 10, 22, 13, 0, 0, 0, time.UTC)); second != first {
+		t.Fatalf("hash moved with the clock: %s != %s", first, second)
+	}
+	host := aptCacheHost(time.Date(2026, 10, 22, 13, 0, 0, 0, time.UTC), files)
+	token := NewUpdates(host).ChangeToken()
+
+	files["var/lib/apt/periodic/update-success-stamp"] = time.Date(2026, 10, 22, 12, 30, 0, 0, time.UTC)
+	if refreshed := hash(time.Date(2026, 10, 22, 13, 0, 0, 0, time.UTC)); refreshed == first {
+		t.Fatal("hash ignores a refreshed cache")
+	}
+	host = aptCacheHost(time.Date(2026, 10, 22, 13, 0, 0, 0, time.UTC), files)
+	if NewUpdates(host).ChangeToken() == token {
+		t.Fatal("change token ignores a refreshed cache")
+	}
+	encoded, _ := json.Marshal(collectUpdates(t, host))
+	if !strings.Contains(string(encoded), `"cache_updated_at":"2026-10-22T12:30:00Z"`) {
+		t.Fatalf("encoded = %s", encoded)
+	}
+}
+
+func TestRPMCacheUpdatedAt(t *testing.T) {
+	at := func(minute int) time.Time { return time.Date(2026, 10, 22, 18, minute, 0, 0, time.UTC) }
+	fsys := fstest.MapFS{
+		"var/cache/dnf/baseos-09b2e93483836b7c/repodata/repomd.xml":            {ModTime: at(15)},
+		"var/cache/dnf/baseos-09b2e93483836b7c/repodata/5b0a-primary.xml.gz":   {ModTime: at(35)},
+		"var/cache/dnf/baseos-09b2e93483836b7c/repodata/5b0a-filelists.xml.gz": {ModTime: at(50)},
+		"var/cache/dnf/baseos.solv":                                            {ModTime: at(55)},
+		"var/cache/dnf/expired_repos.json":                                     {ModTime: at(58)},
+	}
+	host := &Host{FS: fsys}
+	if got := host.rpmCacheUpdatedAt(ManagerDnf); got == nil || !got.Equal(at(35)) {
+		t.Fatalf("dnf: %v", got)
+	}
+	if got := host.rpmCacheUpdatedAt(ManagerYum); got != nil {
+		t.Fatalf("yum without a cache: %v", got)
 	}
 }

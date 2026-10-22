@@ -32,6 +32,9 @@ type RunOptions struct {
 	// Payloads keeps the bases of delta datasets. Without it every dataset
 	// is sent in full.
 	Payloads *inventory.PayloadStore
+	// Commands journals received commands across restarts. Nil keeps them
+	// in memory only.
+	Commands *CommandJournal
 	Client   Client
 	Identity Identity
 	// Config holds the local overrides.
@@ -83,10 +86,23 @@ type daemon struct {
 	// sent again until its configuration changes.
 	ignored map[string]bool
 
-	inventoryWake chan struct{}
-	configWake    chan struct{}
-	realtimeKey   string
-	stopRealtime  func()
+	// Commands: a pending GET /commands, the acknowledgements and results
+	// still to send, and executing commands waiting for a push or a
+	// config fetch.
+	commands        *CommandJournal
+	commandsPending bool
+	commandsAt      time.Time
+	commandsBackoff time.Duration
+	// commandsFull is set when GET /commands returned a full page.
+	commandsFull bool
+	acks         commandQueue
+	results      commandQueue
+	waiters      []*commandWaiter
+
+	commandsWake chan struct{}
+	configWake   chan struct{}
+	realtimeKey  string
+	stopRealtime func()
 }
 
 // Run heartbeats, collects datasets on their schedules and delivers changes
@@ -135,11 +151,19 @@ func newDaemon(options RunOptions) *daemon {
 		configPending:    options.ServerConfig.ETag == "",
 		configAt:         now,
 		changePollAt:     now.Add(options.ChangePoll),
-		inventoryWake:    make(chan struct{}, 1),
+		commands:         options.Commands,
+		commandsBackoff:  initialBackoff,
+		acks:             commandQueue{backoff: initialBackoff},
+		results:          commandQueue{backoff: initialBackoff},
+		commandsWake:     make(chan struct{}, 1),
 		configWake:       make(chan struct{}, 1),
 		realtimeKey:      "unset",
 	}
+	if daemon.commands == nil {
+		daemon.commands, _ = OpenCommandJournal("")
+	}
 	daemon.scheduleAll(now)
+	daemon.recoverCommands(now)
 	return daemon
 }
 
@@ -147,26 +171,8 @@ func (daemon *daemon) loop(ctx context.Context) error {
 	options := daemon.options
 	ready := false
 	for {
-		now := options.Now()
-		if !now.Before(daemon.heartbeatAt) {
-			if err := daemon.heartbeat(ctx); err != nil {
-				return daemon.stopped(ctx, err)
-			}
-		}
-		if daemon.configPending && !options.Now().Before(daemon.configAt) {
-			if err := daemon.refreshConfig(ctx); err != nil {
-				return daemon.stopped(ctx, err)
-			}
-		}
-		if !now.Before(daemon.changePollAt) {
-			daemon.pollChanges(now)
-		}
-		if !daemon.unsupported {
-			if due := daemon.due(options.Now()); len(due) > 0 {
-				if err := daemon.deliver(ctx, due); err != nil {
-					return daemon.stopped(ctx, err)
-				}
-			}
+		if err := daemon.tick(ctx); err != nil {
+			return daemon.stopped(ctx, err)
 		}
 		if ctx.Err() != nil {
 			return nil
@@ -188,17 +194,60 @@ func (daemon *daemon) loop(ctx context.Context) error {
 			timer.Stop()
 			daemon.settings.local = config
 			daemon.scheduleAll(options.Now())
+			daemon.pruneWaiters()
 			log.Printf("[config] reloaded; collecting %d datasets now", len(daemon.next))
-		case <-daemon.inventoryWake:
+		case <-daemon.commandsWake:
 			timer.Stop()
-			log.Printf("[realtime] inventory requested; collecting every dataset")
-			daemon.scheduleAll(options.Now())
+			daemon.requestCommands(options.Now())
 		case <-daemon.configWake:
 			timer.Stop()
 			daemon.configPending = true
 			daemon.configAt = options.Now()
 		}
 	}
+}
+
+// tick runs everything that is due: heartbeat, config, commands,
+// inventory and command results. It returns only fatal errors.
+func (daemon *daemon) tick(ctx context.Context) error {
+	options := daemon.options
+	now := options.Now()
+	if !now.Before(daemon.heartbeatAt) {
+		if err := daemon.heartbeat(ctx); err != nil {
+			return err
+		}
+	}
+	if daemon.configPending && !options.Now().Before(daemon.configAt) {
+		if err := daemon.refreshConfig(ctx); err != nil {
+			return err
+		}
+	}
+	if !now.Before(daemon.changePollAt) {
+		daemon.pollChanges(now)
+	}
+	if !daemon.unsupported {
+		if daemon.commandsPending && !options.Now().Before(daemon.commandsAt) {
+			if err := daemon.fetchCommands(ctx); err != nil {
+				return err
+			}
+		}
+		if err := daemon.sendAcks(ctx); err != nil {
+			return err
+		}
+	}
+	if !daemon.unsupported {
+		if due := daemon.due(options.Now()); len(due) > 0 {
+			if err := daemon.deliver(ctx, due); err != nil {
+				return err
+			}
+		}
+	}
+	if !daemon.unsupported {
+		if err := daemon.sendResults(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // stopped turns a fatal error into Run's result. Cancellation is a clean
@@ -219,6 +268,14 @@ func (daemon *daemon) wakeAt() time.Time {
 		wakeAt = daemon.changePollAt
 	}
 	if !daemon.unsupported {
+		if daemon.commandsPending && daemon.commandsAt.Before(wakeAt) {
+			wakeAt = daemon.commandsAt
+		}
+		for _, queue := range []*commandQueue{&daemon.acks, &daemon.results} {
+			if len(queue.ids) > 0 && queue.at.Before(wakeAt) {
+				wakeAt = queue.at
+			}
+		}
 		for _, at := range daemon.next {
 			if at.Before(wakeAt) {
 				wakeAt = at
@@ -348,6 +405,9 @@ func (daemon *daemon) heartbeat(ctx context.Context) error {
 		daemon.configPending = true
 		daemon.configAt = options.Now()
 	}
+	if response.CommandsAvailable {
+		daemon.requestCommands(options.Now())
+	}
 	return nil
 }
 
@@ -387,14 +447,15 @@ func (daemon *daemon) refreshConfig(ctx context.Context) error {
 			daemon.configPending = false
 		}
 		daemon.configAt = options.Now().Add(wait)
+		daemon.settleConfig(err)
 		return nil
 	}
 	daemon.configPending = false
 	daemon.configBackoff = initialBackoff
-	if result.NotModified {
-		return nil
+	if !result.NotModified {
+		daemon.applyConfig(result.Config)
 	}
-	daemon.applyConfig(result.Config)
+	daemon.settleConfig(nil)
 	return nil
 }
 
@@ -410,6 +471,7 @@ func (daemon *daemon) applyConfig(config ServerConfig) {
 		}
 	}
 	daemon.reschedule(daemon.options.Now())
+	daemon.pruneWaiters()
 	daemon.updateRealtime(config.Realtime)
 	log.Printf("[config] applied backend configuration %s: datasets %s, heartbeat %s",
 		config.ETag, strings.Join(config.Datasets, ", "), daemon.settings.Heartbeat())
@@ -452,11 +514,14 @@ func (daemon *daemon) closeRealtime() {
 // signals the loop.
 func (daemon *daemon) onRealtimeEvent(event string) {
 	switch event {
-	case EventConfigUpdated, eventSubscribed:
-		// A fresh subscription may have missed events: check the config.
+	case EventConfigUpdated:
 		notify(daemon.configWake)
-	case EventInventoryRequested:
-		notify(daemon.inventoryWake)
+	case EventCommandsAvailable:
+		notify(daemon.commandsWake)
+	case eventSubscribed:
+		// A fresh subscription may have missed events: check both.
+		notify(daemon.configWake)
+		notify(daemon.commandsWake)
 	}
 }
 
@@ -511,6 +576,7 @@ func (daemon *daemon) deliver(ctx context.Context, due []string) error {
 		if fatal != nil {
 			return fatal
 		}
+		daemon.settleInventory(due, err, nil)
 		for _, name := range due {
 			if wait == 0 {
 				wait = normalJitter(daemon.settings.Interval(name), JitterFraction, options.Jitter)
@@ -521,6 +587,7 @@ func (daemon *daemon) deliver(ctx context.Context, due []string) error {
 	}
 
 	daemon.inventoryBackoff = initialBackoff
+	daemon.settleInventory(due, nil, outcome.failures)
 	for _, name := range due {
 		if _, enabled := daemon.next[name]; enabled {
 			daemon.next[name] = now.Add(normalJitter(daemon.settings.Interval(name), JitterFraction, options.Jitter))
@@ -534,9 +601,11 @@ func (daemon *daemon) deliver(ctx context.Context, due []string) error {
 	return nil
 }
 
-// cycleOutcome lists datasets to send again right away.
+// cycleOutcome lists datasets to send again right away and the collector
+// errors of the round.
 type cycleOutcome struct {
 	retryNow []string
+	failures map[string]string
 }
 
 // pendingDataset is a dataset in flight.
@@ -611,7 +680,7 @@ func (daemon *daemon) cycle(ctx context.Context, names []string) (cycleOutcome, 
 		envelope.Errors = failures
 	}
 	if len(envelope.Datasets) == 0 && !errorsChanged {
-		return cycleOutcome{}, nil
+		return cycleOutcome{failures: failures}, nil
 	}
 
 	seq, err := options.Store.NextSeq()
@@ -623,7 +692,9 @@ func (daemon *daemon) cycle(ctx context.Context, names []string) (cycleOutcome, 
 	if err != nil {
 		return cycleOutcome{}, err
 	}
-	return daemon.acknowledge(envelope, pending, response, nextReported)
+	outcome, err := daemon.acknowledge(envelope, pending, response, nextReported)
+	outcome.failures = failures
+	return outcome, err
 }
 
 func (daemon *daemon) addDelta(envelope *inventory.Envelope, dataset inventory.Dataset, acknowledged string, keyFields []string) (bool, error) {

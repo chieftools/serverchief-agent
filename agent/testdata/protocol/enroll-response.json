@@ -4,7 +4,9 @@
     "system",
     "hardware",
     "network",
-    "resolvers"
+    "resolvers",
+    "packages",
+    "updates"
   ],
   "endpoint": "https://server.chief.test/agent/v1",
   "generation": 1,
@@ -12,8 +14,10 @@
     "datasets": {
       "hardware": 3600,
       "network": 300,
+      "packages": 3600,
       "resolvers": 300,
-      "system": 300
+      "system": 300,
+      "updates": 21600
     },
     "heartbeat": 300
   },

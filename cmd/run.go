@@ -65,6 +65,10 @@ the systemd unit does not restart.`,
 			if err != nil {
 				return err
 			}
+			commands, err := agent.OpenCommandJournal(paths.Commands)
+			if err != nil {
+				return err
+			}
 			serverConfig, _, err := agent.LoadServerConfig(paths.ServerConfig)
 			if err != nil {
 				log.Printf("[config] %v; fetching it again", err)
@@ -90,6 +94,7 @@ the systemd unit does not restart.`,
 				Registry:     collector.Default(collector.NewHost(root)),
 				Store:        store,
 				Payloads:     inventory.NewPayloadStore(paths.Payloads),
+				Commands:     commands,
 				Client:       agent.NewClient(identity.Endpoint, identity.Credential, version, httpClient),
 				Identity:     identity,
 				Config:       config,
@@ -110,7 +115,7 @@ the systemd unit does not restart.`,
 		},
 	}
 	command.Flags().StringVar(&logFile, "log-file", "", "Log to this file with size-capped rotation instead of stderr (for SysV hosts)")
-	command.Flags().StringVar(&stateDir, "state-dir", "", "Directory for state.json and the cached server config (default /var/lib/serverchief)")
+	command.Flags().StringVar(&stateDir, "state-dir", "", "Directory for state.json, the command journal and the cached server config (default /var/lib/serverchief)")
 	command.Flags().StringVar(&identityPath, "identity", "", "Identity file written by setup (default /etc/serverchief/identity.json)")
 	_ = command.Flags().MarkHidden("identity")
 	command.Flags().StringVar(&root, "root", "/", "Read files from this directory instead of /")

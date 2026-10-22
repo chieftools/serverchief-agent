@@ -33,7 +33,7 @@ func TestAuthorizerSignsPrivateSubscriptions(t *testing.T) {
 		_ = json.Unmarshal(subscribe.Data, &data)
 		subscriptions <- data
 		event, _ := json.Marshal("{}")
-		_ = conn.WriteJSON(Message{Event: "inventory.requested", Channel: data["channel"], Data: event})
+		_ = conn.WriteJSON(Message{Event: "commands.available", Channel: data["channel"], Data: event})
 		var ignored Message
 		_ = conn.ReadJSON(&ignored)
 	}))
@@ -49,7 +49,7 @@ func TestAuthorizerSignsPrivateSubscriptions(t *testing.T) {
 		return "app-key:signature", nil
 	})
 	events := make(chan string, 1)
-	client.OnEvent("inventory.requested", func(message Message) { events <- message.Event })
+	client.OnEvent("commands.available", func(message Message) { events <- message.Event })
 	if err := client.Connect(); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestAuthorizerSignsPrivateSubscriptions(t *testing.T) {
 	}
 	select {
 	case event := <-events:
-		if event != "inventory.requested" {
+		if event != "commands.available" {
 			t.Fatalf("event = %s", event)
 		}
 	case <-time.After(5 * time.Second):

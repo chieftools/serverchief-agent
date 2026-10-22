@@ -11,10 +11,9 @@ import (
 
 // Realtime events. They carry no data; they only wake the agent up.
 const (
-	EventConfigUpdated      = "config.updated"
-	EventInventoryRequested = "inventory.requested"
-	EventCommandsAvailable  = "commands.available"
-	eventSubscribed         = "pusher_internal:subscription_succeeded"
+	EventConfigUpdated     = "config.updated"
+	EventCommandsAvailable = "commands.available"
+	eventSubscribed        = "pusher_internal:subscription_succeeded"
 )
 
 // RealtimeChannel is the private channel of a server generation.
@@ -53,7 +52,7 @@ func PusherConnector(version, credential string, tlsConfig *tls.Config) Realtime
 		}
 		client.SetAuthorizer(pusher.Authorizer(authorize))
 		client.SetTLSConfig(tlsConfig)
-		for _, event := range []string{EventConfigUpdated, EventInventoryRequested, EventCommandsAvailable, eventSubscribed} {
+		for _, event := range []string{EventConfigUpdated, EventCommandsAvailable, eventSubscribed} {
 			client.OnEvent(event, func(message pusher.Message) {
 				if message.Channel == "" || message.Channel == channel {
 					onEvent(message.Event)
