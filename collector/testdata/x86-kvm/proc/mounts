@@ -1,0 +1,15 @@
+sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0
+proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
+udev /dev devtmpfs rw,nosuid,relatime,size=4046476k,nr_inodes=1011619,mode=755 0 0
+devpts /dev/pts devpts rw,nosuid,noexec,relatime,gid=5,mode=620,ptmxmode=000 0 0
+tmpfs /run tmpfs rw,nosuid,nodev,noexec,relatime,size=814832k,mode=755 0 0
+/dev/sda1 / ext4 rw,relatime,discard,errors=remount-ro 0 0
+securityfs /sys/kernel/security securityfs rw,nosuid,nodev,noexec,relatime 0 0
+cgroup2 /sys/fs/cgroup cgroup2 rw,nosuid,nodev,noexec,relatime 0 0
+/dev/loop0 /snap/core20/2379 squashfs ro,nodev,relatime 0 0
+/dev/sda15 /boot/efi vfat rw,relatime,fmask=0077,dmask=0077 0 0
+/dev/vda /var/lib/mysql xfs rw,noatime,attr2,inode64,noquota 0 0
+/dev/vda /mnt/My\040Backups xfs ro,noatime 0 0
+nas.example.net:/export/backup /mnt/nfs nfs4 rw,relatime,vers=4.2 0 0
+overlay /var/lib/docker/overlay2/abc/merged overlay rw,relatime 0 0
+tmpfs /run/user/1000 tmpfs rw,nosuid,nodev,relatime,size=814828k,mode=700 0 0

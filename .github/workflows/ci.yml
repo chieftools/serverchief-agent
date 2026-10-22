@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "${unformatted}" ]; then
+            echo "The following Go files are not formatted:"
+            echo "${unformatted}"
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -race -count=1 ./...
+
+      - name: Check shell scripts
+        run: |
+          for script in bin/*.sh packaging/*.sh packaging/serverchief.init; do
+            bash -n "${script}"
+          done
+          shellcheck --severity=warning bin/*.sh packaging/*.sh packaging/serverchief.init
+
+  build:
+    name: Build linux/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: tests
+
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch:
+          - amd64
+          - arm64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build static binary
+        run: ./bin/build.sh "0.0.0-ci.${{ github.run_number }}" "linux-${{ matrix.goarch }}"
+
+      - name: Verify the binary is static
+        run: |
+          file "serverchief-linux-${{ matrix.goarch }}"
+          file "serverchief-linux-${{ matrix.goarch }}" | grep -q "statically linked"
+
+      - name: Smoke test on old and current distributions
+        if: matrix.goarch == 'amd64'
+        run: |
+          for image in ubuntu:14.04 ubuntu:16.04 ubuntu:24.04 debian:8 debian:12 centos:7 almalinux:9; do
+            echo "::group::${image}"
+            docker run --rm -v "${PWD}/serverchief-linux-amd64:/usr/bin/serverchief:ro" "${image}" \
+              /usr/bin/serverchief collect > "collect.json"
+            python3 -c 'import json,sys; e=json.load(open("collect.json")); assert set(e["datasets"]) == {"system","hardware","network","resolvers"}, e; print(e["datasets"]["system"]["payload"]["os"])'
+            echo "::endgroup::"
+          done
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: serverchief-linux-${{ matrix.goarch }}
+          path: serverchief-linux-${{ matrix.goarch }}
+          retention-days: 7

@@ -1,0 +1,10 @@
+/.idea
+/.vscode
+
+/serverchief
+/serverchief-linux-*
+/serverchief-darwin-*
+/serverchief_*.deb
+/serverchief-*.rpm
+/serverchief_*.tar.gz
+/SHA256SUMS

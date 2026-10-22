@@ -1,0 +1,8 @@
+cpu  1234 0 567 89012 34 0 5 0 0 0
+cpu0 617 0 283 44506 17 0 2 0 0 0
+intr 123456 0 9 0
+ctxt 987654
+btime 1792301842
+processes 4321
+procs_running 1
+procs_blocked 0
