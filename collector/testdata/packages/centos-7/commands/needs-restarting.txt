@@ -1,0 +1,2 @@
+No core libraries or services have been updated.
+Reboot is probably not necessary.

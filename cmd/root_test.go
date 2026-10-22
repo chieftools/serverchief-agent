@@ -80,8 +80,8 @@ func TestCollectCommandIsDeterministic(t *testing.T) {
 }
 
 func TestCollectCommandUnknownDataset(t *testing.T) {
-	_, _, err := execute(t, "collect", "--dataset", "packages")
-	if err == nil || !strings.Contains(err.Error(), `unknown dataset "packages"`) {
+	_, _, err := execute(t, "collect", "--dataset", "software")
+	if err == nil || !strings.Contains(err.Error(), `unknown dataset "software"`) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -90,6 +90,26 @@ func TestSetupCommandValidatesToken(t *testing.T) {
 	_, _, err := execute(t, "setup", "not-a-token")
 	if err == nil {
 		t.Fatal("setup accepted an invalid token")
+	}
+}
+
+func TestSetupCommandReadsEnvironmentDefaults(t *testing.T) {
+	t.Setenv("SERVERCHIEF_ENDPOINT", "https://server.chief.test/agent/v1")
+	t.Setenv("SERVERCHIEF_CA_FILE", "/tmp/valet.pem")
+	command := newSetupCommand("1.2.3")
+	if got := command.Flags().Lookup("endpoint").DefValue; got != "https://server.chief.test/agent/v1" {
+		t.Fatalf("endpoint default = %q", got)
+	}
+	if got := command.Flags().Lookup("ca-file").DefValue; got != "/tmp/valet.pem" {
+		t.Fatalf("ca-file default = %q", got)
+	}
+}
+
+func TestRunCommandRequiresEnrollment(t *testing.T) {
+	directory := t.TempDir()
+	_, _, err := execute(t, "run", "--identity", directory+"/identity.json", "--state-dir", directory, "--config", directory+"/config.json")
+	if err == nil || err.Error() != "not enrolled, run `serverchief setup <token>`" {
+		t.Fatalf("err = %v", err)
 	}
 }
 

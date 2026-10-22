@@ -1,12 +1,9 @@
 package agent
 
 import (
-	"context"
 	"crypto/x509"
-	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -25,14 +22,50 @@ func TestLoadConfigDefaultsWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Endpoint != DefaultEndpoint || config.Interval("system") != 5*time.Minute || config.Interval("hardware") != 15*time.Minute {
+	if !config.Enabled("anything") || len(config.Intervals) != 0 || config.HeartbeatInterval != 0 {
 		t.Fatalf("defaults = %#v", config)
 	}
-	if config.Interval("packages") != fallbackInterval || config.Heartbeat() != DefaultHeartbeatInterval {
-		t.Fatal("fallback intervals wrong")
+}
+
+func TestSettingsCombineServerAndLocal(t *testing.T) {
+	server := DefaultServerConfig()
+	defaults := settings{server: server}
+	if defaults.Interval("system") != 5*time.Minute || defaults.Interval("hardware") != time.Hour ||
+		defaults.Interval("updates") != 6*time.Hour || defaults.Interval("unknown") != fallbackInterval || defaults.Heartbeat() != DefaultHeartbeatInterval {
+		t.Fatal("protocol defaults wrong")
 	}
-	if !config.Enabled("anything") {
-		t.Fatal("datasets disabled by default")
+	if !defaults.Enabled("system") || defaults.Enabled("packages") {
+		t.Fatal("default datasets wrong")
+	}
+
+	server.Intervals = ServerIntervals{Heartbeat: 120, Datasets: map[string]int{"system": 60, "network": 1}}
+	server.Datasets = []string{"system", "network", "packages"}
+	combined := settings{server: server, local: Config{Intervals: map[string]Duration{"system": Duration(10 * time.Minute)}, Datasets: []string{"system", "packages"}}}
+	if combined.Interval("system") != 10*time.Minute || combined.Interval("network") != MinimumInterval || combined.Heartbeat() != 2*time.Minute {
+		t.Fatal("server intervals or local overrides not applied")
+	}
+	if !combined.Enabled("packages") || combined.Enabled("network") || combined.Enabled("hardware") {
+		t.Fatal("local datasets must narrow the server's")
+	}
+}
+
+func TestServerConfigCache(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server-config.json")
+	config, found, err := LoadServerConfig(path)
+	if err != nil || found || config.ETag != "" || len(config.Datasets) != 4 {
+		t.Fatalf("missing cache = %+v, %v, %v", config, found, err)
+	}
+	config.ETag = `"c9"`
+	config.Realtime = &Realtime{Key: "k", Host: "h", Port: 443, Scheme: "https"}
+	if err := SaveServerConfig(path, config); err != nil {
+		t.Fatal(err)
+	}
+	loaded, found, err := LoadServerConfig(path)
+	if err != nil || !found || loaded.ETag != `"c9"` || loaded.Realtime.Host != "h" {
+		t.Fatalf("cache = %+v, %v, %v", loaded, found, err)
+	}
+	if mode := fileMode(t, path); mode != 0o600 {
+		t.Fatalf("cache mode = %o", mode)
 	}
 }
 
@@ -55,7 +88,7 @@ func TestLoadConfigRejectsInvalid(t *testing.T) {
 		"unknown field":   `{"intervall": {}}`,
 		"short interval":  `{"intervals": {"system": "1s"}}`,
 		"bad duration":    `{"intervals": {"system": 300}}`,
-		"http endpoint":   `{"endpoint": "http://server.chief.app/agent/v1"}`,
+		"endpoint moved":  `{"endpoint": "https://server.chief.app/agent/v1"}`,
 		"short heartbeat": `{"heartbeat_interval": "5s"}`,
 		"not json":        `{`,
 	} {
@@ -81,32 +114,6 @@ func TestValidEndpoint(t *testing.T) {
 	}
 }
 
-func TestEnrollValidatesPreconditions(t *testing.T) {
-	root := func() bool { return true }
-	cases := []struct {
-		name    string
-		token   string
-		options EnrollOptions
-		want    string
-	}{
-		{"not root", "scenr_abc", EnrollOptions{RootCheck: func() bool { return false }}, "must run as root"},
-		{"darwin", "scenr_abc", EnrollOptions{RootCheck: root, Platform: "darwin", Architecture: "arm64"}, "requires Linux"},
-		{"386", "scenr_abc", EnrollOptions{RootCheck: root, Platform: "linux", Architecture: "386"}, "requires Linux"},
-		{"bad token", "abc", EnrollOptions{RootCheck: root, Platform: "linux", Architecture: "amd64"}, "must start with scenr_"},
-		{"empty token", "scenr_", EnrollOptions{RootCheck: root, Platform: "linux", Architecture: "amd64"}, "must start with scenr_"},
-	}
-	for _, test := range cases {
-		_, err := Enroll(context.Background(), test.token, test.options)
-		if err == nil || !strings.Contains(err.Error(), test.want) {
-			t.Errorf("%s: Enroll() = %v, want %q", test.name, err, test.want)
-		}
-	}
-	_, err := Enroll(context.Background(), "scenr_abc", EnrollOptions{RootCheck: root, Platform: "linux", Architecture: "arm64"})
-	if !errors.Is(err, ErrNotImplemented) {
-		t.Fatalf("Enroll() = %v, want ErrNotImplemented", err)
-	}
-}
-
 func TestRootCAsIncludesEmbeddedBundle(t *testing.T) {
 	pool := RootCAs()
 	system, err := x509.SystemCertPool()
@@ -116,8 +123,11 @@ func TestRootCAsIncludesEmbeddedBundle(t *testing.T) {
 	if pool == nil || pool.Equal(system) {
 		t.Fatal("RootCAs() did not add the embedded roots")
 	}
-	client := NewHTTPClient()
-	if client.Timeout == 0 {
-		t.Fatal("client without timeout")
+	client, err := NewHTTPClient("")
+	if err != nil || client.Timeout == 0 {
+		t.Fatalf("client = %v, %v", client, err)
+	}
+	if _, err := NewHTTPClient(filepath.Join(t.TempDir(), "missing.pem")); err == nil {
+		t.Fatal("a missing CA file was accepted")
 	}
 }

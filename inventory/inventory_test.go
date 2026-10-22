@@ -118,6 +118,10 @@ func TestEnvelopeJSON(t *testing.T) {
 	if decoded["seq"].(float64) != 7 {
 		t.Fatalf("seq = %v", decoded["seq"])
 	}
+	collectedAt, _ := decoded["collected_at"].(string)
+	if parsed, err := time.Parse(time.RFC3339, collectedAt); err != nil || !strings.HasSuffix(collectedAt, "Z") || parsed.Nanosecond() != 0 {
+		t.Fatalf("collected_at = %q, want a UTC RFC 3339 timestamp without fractional seconds", collectedAt)
+	}
 	if _, ok := decoded["errors"]; ok {
 		t.Fatal("errors present without failures")
 	}
@@ -269,5 +273,68 @@ func TestStateStoreRecoversFromCorruptFile(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".corrupt"); err != nil {
 		t.Fatalf("corrupt file not moved aside: %v", err)
+	}
+}
+
+func TestStateStoreAcknowledgementsAndErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := OpenStateStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq, _ := store.NextSeq(); seq != 1 {
+		t.Fatalf("seq = %d", seq)
+	}
+	if err := store.Acknowledge(1, map[string]string{"system": "abc"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetReportedErrors(map[string]string{"network": "broken"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdvanceSeq(40); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdvanceSeq(3); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenStateStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Seq() != 40 || reopened.AcknowledgedSeq() != 1 || reopened.Hash("system") != "abc" || reopened.ReportedErrors()["network"] != "broken" {
+		t.Fatalf("reopened state = %+v", reopened.Snapshot())
+	}
+	if err := reopened.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Seq() != 40 || reopened.AcknowledgedSeq() != 1 || reopened.Hash("system") != "" || len(reopened.ReportedErrors()) != 0 {
+		t.Fatalf("reset state = %+v", reopened.Snapshot())
+	}
+}
+
+func TestPayloadStore(t *testing.T) {
+	store := NewPayloadStore(filepath.Join(t.TempDir(), "payloads"))
+	if data, err := store.Load("packages"); err != nil || data != nil {
+		t.Fatalf("empty store = %q, %v", data, err)
+	}
+	if err := store.Save("packages", []byte(`{"items":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := store.Load("packages"); string(data) != `{"items":[]}` {
+		t.Fatalf("loaded %q", data)
+	}
+	if err := store.Remove("packages", "missing"); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := store.Load("packages"); data != nil {
+		t.Fatal("removed payload still loads")
+	}
+	_ = store.Save("updates", []byte(`{}`))
+	if err := store.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := store.Load("updates"); data != nil {
+		t.Fatal("cleared payload still loads")
 	}
 }

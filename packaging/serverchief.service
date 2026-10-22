@@ -12,6 +12,9 @@ ExecStart=/usr/bin/serverchief run
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=10s
+# Exit status 2: the backend revoked the credential. Restarting would only
+# hammer the API until `serverchief setup` runs again.
+RestartPreventExitStatus=2
 TimeoutStartSec=5min
 TimeoutStopSec=30s
 KillMode=mixed

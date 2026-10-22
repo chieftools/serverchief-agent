@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"io/fs"
 	"net"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Uname mirrors the fields of uname(2) that collectors use.
@@ -51,6 +54,19 @@ type Host struct {
 	Statfs      func(path string) (FSStats, error)
 	Interfaces  func() ([]NetInterface, error)
 	LookupCNAME func(ctx context.Context, host string) (string, error)
+	// Command runs a read-only query tool such as rpm or apt-get. Its error
+	// is only for a program that could not run; a non-zero exit status is
+	// reported in CommandResult.ExitCode.
+	Command func(ctx context.Context, name string, args ...string) (CommandResult, error)
+	// Now is the clock for ages such as the package cache age.
+	Now func() time.Time
+}
+
+// CommandResult is the outcome of Host.Command.
+type CommandResult struct {
+	Stdout   []byte
+	Stderr   []byte
+	ExitCode int
 }
 
 // NewHost returns a Host for the running machine, optionally rooted at a
@@ -64,6 +80,8 @@ func NewHost(root string) *Host {
 		Root:        root,
 		Interfaces:  systemInterfaces,
 		LookupCNAME: net.DefaultResolver.LookupCNAME,
+		Command:     systemCommand,
+		Now:         time.Now,
 	}
 	host.Uname = systemUname
 	host.Statfs = func(mountPoint string) (FSStats, error) {
@@ -75,8 +93,61 @@ func NewHost(root string) *Host {
 		host.Uname = nil
 		host.Interfaces = nil
 		host.LookupCNAME = nil
+		host.Command = nil
 	}
 	return host
+}
+
+// OSRelease identifies the host's distribution.
+func (host *Host) OSRelease() OSRelease {
+	return host.readOSRelease()
+}
+
+// systemCommand runs name with the C locale, so output parsing does not
+// depend on the host's language settings.
+func systemCommand(ctx context.Context, name string, args ...string) (CommandResult, error) {
+	command := exec.CommandContext(ctx, name, args...)
+	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "LANGUAGE=C")
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
+	result := CommandResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) && ctx.Err() == nil {
+		result.ExitCode = exitError.ExitCode()
+		return result, nil
+	}
+	return result, err
+}
+
+// run calls Host.Command, failing when commands are unavailable.
+func (host *Host) run(ctx context.Context, name string, args ...string) (CommandResult, error) {
+	if host.Command == nil {
+		return CommandResult{}, errNoCommands
+	}
+	return host.Command(ctx, name, args...)
+}
+
+var errNoCommands = errors.New("running commands is not available for this host")
+
+// findCommand returns the first of the usual binary directories that
+// holds name, or "".
+func (host *Host) findCommand(name string) string {
+	for _, directory := range []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/bin"} {
+		candidate := directory + "/" + name
+		if info, err := fs.Stat(host.FS, relative(candidate)); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func (host *Host) now() time.Time {
+	if host.Now == nil {
+		return time.Now()
+	}
+	return host.Now()
 }
 
 func relative(name string) string {

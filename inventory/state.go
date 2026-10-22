@@ -23,9 +23,16 @@ type SentDataset struct {
 
 // State is the persisted delivery state.
 type State struct {
-	Version  int                    `json:"version"`
-	Seq      uint64                 `json:"seq"`
+	Version int `json:"version"`
+	// Seq is the last sequence number reserved for an envelope.
+	Seq uint64 `json:"seq"`
+	// AcknowledgedSeq is the last sequence number the backend answered.
+	AcknowledgedSeq uint64 `json:"acknowledged_seq"`
+	// Datasets holds the hashes the backend acknowledged.
 	Datasets map[string]SentDataset `json:"datasets"`
+	// Errors holds the collector errors last reported to the backend, so
+	// an unchanged error is not reported again every round.
+	Errors map[string]string `json:"errors,omitempty"`
 }
 
 // StateStore keeps State in a JSON file. Every change is written to a
@@ -105,14 +112,82 @@ func (store *StateStore) NextSeq() (uint64, error) {
 	return next.Seq, nil
 }
 
+// AdvanceSeq raises the sequence number to at least seq, for when the
+// backend already stored a higher one (for example after a reinstall).
+func (store *StateStore) AdvanceSeq(seq uint64) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if seq <= store.state.Seq {
+		return nil
+	}
+	next := store.state
+	next.Seq = seq
+	if err := store.write(next); err != nil {
+		return err
+	}
+	store.state = next
+	return nil
+}
+
+// Seq returns the last reserved sequence number.
+func (store *StateStore) Seq() uint64 {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.state.Seq
+}
+
+// ReportedErrors returns the collector errors last reported.
+func (store *StateStore) ReportedErrors() map[string]string {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	errors := make(map[string]string, len(store.state.Errors))
+	for name, message := range store.state.Errors {
+		errors[name] = message
+	}
+	return errors
+}
+
+// SetReportedErrors replaces the reported collector errors.
+func (store *StateStore) SetReportedErrors(errors map[string]string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	next := store.state
+	next.Errors = make(map[string]string, len(errors))
+	for name, message := range errors {
+		next.Errors[name] = message
+	}
+	if len(next.Errors) == 0 {
+		next.Errors = nil
+	}
+	if err := store.write(next); err != nil {
+		return err
+	}
+	store.state = next
+	return nil
+}
+
+// AcknowledgedSeq returns the last sequence number the backend answered.
+func (store *StateStore) AcknowledgedSeq() uint64 {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.state.AcknowledgedSeq
+}
+
 // MarkSent records hashes the backend acknowledged.
 func (store *StateStore) MarkSent(hashes map[string]string, at time.Time) error {
-	if len(hashes) == 0 {
+	return store.Acknowledge(0, hashes, at)
+}
+
+// Acknowledge records the backend's answer to envelope seq: the hashes it
+// now stores. A zero seq leaves AcknowledgedSeq alone.
+func (store *StateStore) Acknowledge(seq uint64, hashes map[string]string, at time.Time) error {
+	if len(hashes) == 0 && seq <= store.AcknowledgedSeq() {
 		return nil
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	next := store.state
+	next.AcknowledgedSeq = max(next.AcknowledgedSeq, seq)
 	next.Datasets = make(map[string]SentDataset, len(store.state.Datasets)+len(hashes))
 	for name, dataset := range store.state.Datasets {
 		next.Datasets[name] = dataset
@@ -147,13 +222,27 @@ func (store *StateStore) Forget(names ...string) error {
 	return nil
 }
 
-// Reset clears everything except the sequence number, which must keep
+// Reset clears everything except the sequence numbers, which must keep
 // increasing for the backend's replay protection.
 func (store *StateStore) Reset() error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	next := emptyState()
 	next.Seq = store.state.Seq
+	next.AcknowledgedSeq = store.state.AcknowledgedSeq
+	if err := store.write(next); err != nil {
+		return err
+	}
+	store.state = next
+	return nil
+}
+
+// Clear forgets everything, sequence numbers included. Enrollment uses it:
+// the backend resets its last_inventory_seq for a new generation.
+func (store *StateStore) Clear() error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	next := emptyState()
 	if err := store.write(next); err != nil {
 		return err
 	}
@@ -169,6 +258,12 @@ func (store *StateStore) Snapshot() State {
 	snapshot.Datasets = make(map[string]SentDataset, len(store.state.Datasets))
 	for name, dataset := range store.state.Datasets {
 		snapshot.Datasets[name] = dataset
+	}
+	if store.state.Errors != nil {
+		snapshot.Errors = make(map[string]string, len(store.state.Errors))
+		for name, message := range store.state.Errors {
+			snapshot.Errors[name] = message
+		}
 	}
 	return snapshot
 }

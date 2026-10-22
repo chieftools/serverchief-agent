@@ -1,0 +1,6 @@
+{
+  "detail": "This agent credential was revoked. Run `serverchief setup` with a new token to enroll again.",
+  "status": 401,
+  "title": "Credential revoked",
+  "type": "revoked"
+}

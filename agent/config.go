@@ -21,20 +21,22 @@ const (
 	JitterFraction = 0.1
 )
 
-// DefaultIntervals is the per-dataset collection cadence from the plan:
-// cheap datasets every five minutes, hardware less often.
+// DefaultIntervals is the per-dataset collection cadence from the
+// protocol's defaults, used until the backend sends its own.
 var DefaultIntervals = map[string]time.Duration{
 	"system":    5 * time.Minute,
 	"network":   5 * time.Minute,
 	"resolvers": 5 * time.Minute,
-	"hardware":  15 * time.Minute,
+	"hardware":  time.Hour,
+	"packages":  time.Hour,
+	"updates":   6 * time.Hour,
 }
 
 // DefaultHeartbeatInterval is how often the agent checks in.
 const DefaultHeartbeatInterval = 5 * time.Minute
 
 // fallbackInterval applies to datasets without a configured interval.
-const fallbackInterval = 15 * time.Minute
+const fallbackInterval = time.Hour
 
 // Duration is a time.Duration that encodes as a Go duration string.
 type Duration time.Duration
@@ -56,18 +58,20 @@ func (duration *Duration) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Config is /etc/serverchief/config.json. Every field is optional.
+// Config is /etc/serverchief/config.json: operator overrides on top of
+// what the backend configures. Every field is optional.
 type Config struct {
-	Endpoint          string              `json:"endpoint,omitempty"`
-	Intervals         map[string]Duration `json:"intervals,omitempty"`
-	HeartbeatInterval Duration            `json:"heartbeat_interval,omitempty"`
-	// Datasets restricts collection to the named datasets.
+	// Intervals override the backend's per-dataset intervals.
+	Intervals map[string]Duration `json:"intervals,omitempty"`
+	// HeartbeatInterval overrides the backend's heartbeat interval.
+	HeartbeatInterval Duration `json:"heartbeat_interval,omitempty"`
+	// Datasets further restricts the datasets the backend enabled.
 	Datasets []string `json:"datasets,omitempty"`
 }
 
-// DefaultConfig returns the built-in configuration.
+// DefaultConfig returns the built-in configuration: no overrides.
 func DefaultConfig() Config {
-	return Config{Endpoint: DefaultEndpoint}
+	return Config{}
 }
 
 // LoadConfig reads path on top of the defaults. A missing file is not an
@@ -94,9 +98,6 @@ func LoadConfig(path string) (Config, error) {
 
 // Validate checks the configuration.
 func (config Config) Validate() error {
-	if config.Endpoint != "" && !validEndpoint(config.Endpoint) {
-		return fmt.Errorf("endpoint must be an https:// URL")
-	}
 	for name, interval := range config.Intervals {
 		if time.Duration(interval) < MinimumInterval {
 			return fmt.Errorf("interval for %s must be at least %s", name, MinimumInterval)

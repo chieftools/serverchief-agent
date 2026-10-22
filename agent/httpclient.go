@@ -3,8 +3,10 @@ package agent
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"golang.org/x/crypto/x509roots/fallback/bundle"
@@ -33,21 +35,42 @@ func RootCAs() *x509.CertPool {
 	return pool
 }
 
+// TLSConfig returns the TLS settings for backend and realtime connections:
+// TLS 1.2+, RootCAs, plus the PEM certificates in caFile when it is set
+// (a local development CA such as Laravel Valet's).
+func TLSConfig(caFile string) (*tls.Config, error) {
+	pool := RootCAs()
+	if caFile != "" {
+		data, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("read CA file: %w", err)
+		}
+		if !pool.AppendCertsFromPEM(data) {
+			return nil, fmt.Errorf("CA file %s contains no PEM certificates", caFile)
+		}
+	}
+	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, nil
+}
+
 // NewHTTPClient returns the client used for backend requests: proxy aware,
-// TLS 1.2+, with RootCAs and conservative timeouts.
-func NewHTTPClient() *http.Client {
+// with TLSConfig(caFile) and conservative timeouts.
+func NewHTTPClient(caFile string) (*http.Client, error) {
+	tlsConfig, err := TLSConfig(caFile)
+	if err != nil {
+		return nil, err
+	}
 	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
 	return &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 60 * time.Second,
 		Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
 			DialContext:           dialer.DialContext,
-			TLSClientConfig:       &tls.Config{RootCAs: RootCAs(), MinVersion: tls.VersionTLS12},
+			TLSClientConfig:       tlsConfig,
 			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 20 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
 			IdleConnTimeout:       90 * time.Second,
 			MaxIdleConns:          2,
 			ForceAttemptHTTP2:     true,
 		},
-	}
+	}, nil
 }

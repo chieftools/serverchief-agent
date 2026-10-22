@@ -3,6 +3,7 @@ package pusher
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -68,6 +69,10 @@ func (message Message) UnmarshalData(target any) error {
 // MessageHandler handles a Realtime event.
 type MessageHandler func(message Message)
 
+// Authorizer signs a private channel subscription for socketID and returns
+// the Pusher "auth" value. It replaces the built-in form POST to AuthURL.
+type Authorizer func(ctx context.Context, socketID, channel string) (string, error)
+
 // ConnectionEstablishedMessageData contains the Pusher connection details.
 type ConnectionEstablishedMessageData struct {
 	SocketID        string `json:"socket_id"`
@@ -83,6 +88,8 @@ type Client struct {
 	protocol       string
 	verbose        bool
 	httpClient     *http.Client
+	authorizer     Authorizer
+	tlsConfig      *tls.Config
 	conn           *websocket.Conn
 	socketID       string
 	isConnected    bool
@@ -121,6 +128,20 @@ func NewClient(config *Config, userAgent, credential, protocol string, httpClien
 	}
 }
 
+// SetAuthorizer makes the client sign private channels with authorizer.
+func (c *Client) SetAuthorizer(authorizer Authorizer) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.authorizer = authorizer
+}
+
+// SetTLSConfig sets the TLS configuration for wss:// connections.
+func (c *Client) SetTLSConfig(config *tls.Config) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tlsConfig = config
+}
+
 // Start connects and keeps retrying until the client is disconnected.
 func (c *Client) Start() {
 	if err := c.Connect(); err != nil {
@@ -151,6 +172,7 @@ func (c *Client) Connect() error {
 	config := *c.config
 	userAgent := c.userAgent
 	generation := c.generation
+	tlsConfig := c.tlsConfig
 	ctx, cancel := context.WithTimeout(context.Background(), websocketHandshakeTimeout)
 	c.isConnecting = true
 	c.connectCancel = cancel
@@ -160,6 +182,9 @@ func (c *Client) Connect() error {
 	websocketURL := buildWebSocketURLFromConfig(&config)
 	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = websocketHandshakeTimeout
+	if tlsConfig != nil {
+		dialer.TLSClientConfig = tlsConfig.Clone()
+	}
 
 	connection, _, err := dialer.DialContext(ctx, websocketURL, map[string][]string{
 		"User-Agent": {userAgent},
@@ -547,6 +572,7 @@ func (c *Client) subscribeToChannel(conn *websocket.Conn, socketID string) error
 	userAgent := c.userAgent
 	protocol := c.protocol
 	verbose := c.verbose
+	authorizer := c.authorizer
 	c.mu.RUnlock()
 
 	if config.Channel == "" {
@@ -560,7 +586,15 @@ func (c *Client) subscribeToChannel(conn *websocket.Conn, socketID string) error
 	var subscribeData map[string]any
 
 	if strings.HasPrefix(config.Channel, "private-") {
-		auth, err := c.generateChannelAuth(socketID, config.Channel, config.AuthURL, credential, userAgent, protocol)
+		var auth string
+		var err error
+		if authorizer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			auth, err = authorizer(ctx, socketID, config.Channel)
+			cancel()
+		} else {
+			auth, err = c.generateChannelAuth(socketID, config.Channel, config.AuthURL, credential, userAgent, protocol)
+		}
 		if err != nil {
 			c.closeWebSocket(conn, websocket.ClosePolicyViolation, "channel authorization failed")
 			return fmt.Errorf("failed to generate auth: %w", err)

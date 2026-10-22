@@ -1,0 +1,13 @@
+{
+  "agent_version": "0.1.0",
+  "architecture": "arm64",
+  "attempt_id": "01JB8Z6Q3W4X5Y6Z7A8B9C0D1E",
+  "credential": "scagt_dGhpc19pc19hX2ZpeHR1cmVfY3JlZGVudGlhbF8zMmI",
+  "hostname": "81057e258b52",
+  "init_system": "sysv",
+  "platform": "ubuntu 16.04.7",
+  "previous_generation": null,
+  "previous_server_id": null,
+  "protocol_revision": "1.0.0",
+  "token": "scenr_Q2xhdWRlQ29kZVNlcnZlckNoaWVmRml4dHVyZTA"
+}

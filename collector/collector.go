@@ -25,25 +25,78 @@ type Collector interface {
 	Collect(ctx context.Context) (any, error)
 }
 
+// KeyedDataset is implemented by collectors whose payload holds a keyed
+// list under "items" that is sent as a delta (inventory.Delta) once the
+// backend has a base. An item's key joins DeltaKeyFields with "/"; a field
+// an item lacks is taken from the payload's top level (packages:
+// manager/name/arch).
+type KeyedDataset interface {
+	DeltaKeyFields() []string
+}
+
+// ChangeDetector is implemented by collectors that can cheaply tell that
+// their source changed, such as a package database mtime. The daemon polls
+// ChangeToken and collects early when it changes.
+type ChangeDetector interface {
+	ChangeToken() string
+}
+
 // Registry holds collectors by dataset name.
 type Registry struct {
 	mu         sync.RWMutex
 	collectors map[string]Collector
+	optional   map[string]bool
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{collectors: make(map[string]Collector)}
+	return &Registry{collectors: make(map[string]Collector), optional: make(map[string]bool)}
 }
 
 // Default returns a registry with every built-in collector bound to host.
+// packages and updates are optional: they are collected only when selected
+// explicitly or enabled by the backend.
 func Default(host *Host) *Registry {
 	registry := NewRegistry()
 	registry.MustRegister(NewSystem(host))
 	registry.MustRegister(NewHardware(host))
 	registry.MustRegister(NewNetwork(host))
 	registry.MustRegister(NewResolvers(host))
+	registry.MustRegisterOptional(NewPackages(host))
+	registry.MustRegisterOptional(NewUpdates(host))
 	return registry
+}
+
+// RegisterOptional adds a collector that is left out of DefaultNames.
+func (registry *Registry) RegisterOptional(collector Collector) error {
+	if err := registry.Register(collector); err != nil {
+		return err
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	registry.optional[collector.Name()] = true
+	return nil
+}
+
+// MustRegisterOptional is RegisterOptional that panics on a programming error.
+func (registry *Registry) MustRegisterOptional(collector Collector) {
+	if err := registry.RegisterOptional(collector); err != nil {
+		panic(err)
+	}
+}
+
+// DefaultNames returns the sorted names of the non-optional collectors.
+func (registry *Registry) DefaultNames() []string {
+	names := registry.Names()
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	defaults := names[:0]
+	for _, name := range names {
+		if !registry.optional[name] {
+			defaults = append(defaults, name)
+		}
+	}
+	return defaults
 }
 
 // Register adds a collector. Dataset names must be unique.
@@ -90,10 +143,10 @@ func (registry *Registry) Names() []string {
 }
 
 // Select resolves dataset names to collectors. An empty selection returns
-// every registered collector.
+// every non-optional collector.
 func (registry *Registry) Select(names []string) ([]Collector, error) {
 	if len(names) == 0 {
-		names = registry.Names()
+		names = registry.DefaultNames()
 	}
 	selected := make([]Collector, 0, len(names))
 	seen := make(map[string]bool, len(names))

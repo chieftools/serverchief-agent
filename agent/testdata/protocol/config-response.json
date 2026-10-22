@@ -1,0 +1,25 @@
+{
+  "datasets": [
+    "system",
+    "hardware",
+    "network",
+    "resolvers"
+  ],
+  "etag": "\"c1-5f3a9e\"",
+  "intervals": {
+    "datasets": {
+      "hardware": 3600,
+      "network": 300,
+      "resolvers": 300,
+      "system": 300
+    },
+    "heartbeat": 300
+  },
+  "realtime": {
+    "auth_endpoint": "https://server.chief.test/agent/v1/broadcasting/auth",
+    "host": "socket.chieftools.cloud",
+    "key": "serverchief-local",
+    "port": 443,
+    "scheme": "https"
+  }
+}

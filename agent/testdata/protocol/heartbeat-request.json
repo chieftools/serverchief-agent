@@ -1,0 +1,12 @@
+{
+  "agent_version": "0.1.0",
+  "hashes": {
+    "hardware": "a890c037f87a2721483976db58177bc4d4b434a1d38583683ac1f7a00eb16be3",
+    "network": "65df6948f9c72d08ee4bbf18543df64fc119c08361d4b73bc1a33d012f5fe799",
+    "resolvers": "05956c5cc21442782a8fca0d1a7ae88e07bbd5e4154b77562153119da46cfbaf",
+    "system": "e2c059a6a87f64c6b9e22edb9fecf2ead94bd21e0e27e248265d157b7afbf73e"
+  },
+  "sent_at": "2026-10-22T14:05:00Z",
+  "seq": 1,
+  "started_at": "2026-10-22T13:58:00Z"
+}

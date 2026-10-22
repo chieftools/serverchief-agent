@@ -3,6 +3,7 @@ package inventory
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // Mode says how a dataset payload relates to what the backend stores.
@@ -18,12 +19,15 @@ const (
 )
 
 // Envelope is the body of POST /inventory:
-// {seq, datasets: {name: {hash, mode, base_hash?, payload}}}.
+// {seq, collected_at, datasets: {name: {hash, mode, base_hash?, payload}}}.
 type Envelope struct {
 	// Seq increases with every envelope the agent builds, so the backend can
 	// drop replays and out-of-order deliveries from the spool.
-	Seq      uint64                     `json:"seq"`
-	Datasets map[string]DatasetEnvelope `json:"datasets"`
+	Seq uint64 `json:"seq"`
+	// CollectedAt is when the envelope was built, in UTC with second
+	// precision so it encodes as a plain RFC 3339 timestamp.
+	CollectedAt time.Time                  `json:"collected_at"`
+	Datasets    map[string]DatasetEnvelope `json:"datasets"`
 	// Errors lists datasets whose collector failed this round, keyed by
 	// name. The backend keeps their previous state.
 	Errors map[string]string `json:"errors,omitempty"`
@@ -40,7 +44,11 @@ type DatasetEnvelope struct {
 
 // NewEnvelope returns an empty envelope.
 func NewEnvelope(seq uint64) *Envelope {
-	return &Envelope{Seq: seq, Datasets: make(map[string]DatasetEnvelope)}
+	return &Envelope{
+		Seq:         seq,
+		CollectedAt: time.Now().UTC().Truncate(time.Second),
+		Datasets:    make(map[string]DatasetEnvelope),
+	}
 }
 
 // AddFull adds a dataset in full mode.

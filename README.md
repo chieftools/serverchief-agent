@@ -5,7 +5,7 @@ The Server Chief Agent is a small, static Go binary that inventories a Linux ser
 The agent only makes outbound connections. It never listens on a port.
 
 > [!CAUTION]
-> This agent is in early development. Enrollment and delivery to the Server Chief backend are not implemented yet: `serverchief run` collects on schedule and logs what it would send. `serverchief collect` already works as a local inspection tool.
+> This agent is in early development. It speaks revision 1.0.0 of the agent protocol (`serverchief/protocol/agent/v1`), which may still change before the first production deploy.
 
 ## Supported systems
 
@@ -32,6 +32,7 @@ CentOS 6 and other 2.6.x kernels are not supported.
 serverchief collect --pretty
 serverchief collect --dataset system --dataset network
 serverchief collect --root /mnt/image --dataset system   # read an offline tree
+serverchief collect -d packages -d updates --pretty       # optional datasets, see below
 ```
 
 Trimmed output from `debian:12` on arm64:
@@ -70,17 +71,41 @@ Trimmed output from `debian:12` on arm64:
 }
 ```
 
+### Set up
+
+```bash
+sudo serverchief setup <token>
+sudo serverchief setup --endpoint https://server.chief.test/agent/v1 --ca-file /path/to/ca.pem <token>
+```
+
+Setup exchanges the one-time `scenr_…` token from the dashboard for this server's identity:
+
+1. It generates an attempt ID and a `scagt_…` credential and journals both in `/etc/serverchief/setup.json` (0600) **before** calling the backend, so a retried setup (after a crash or a network error) sends the same values and the backend can replay its answer.
+2. It calls `POST /enroll`, writes `/etc/serverchief/identity.json` (0600) with the endpoint, server ID, generation, credential and CA file, caches the configuration from the response, resets the delivery state and deletes `setup.json`.
+3. It enables and starts the service through systemd or the SysV script. On a host without a supported init system, or without the packaged unit or script (a container with only the binary), it prints how to run `serverchief run` yourself and still succeeds.
+
+Running setup with a new token on an enrolled server re-enrolls it: the request carries `previous_server_id` and `previous_generation`, the old credential is revoked by the backend, and the service is restarted with the new identity. Running it again with a token that already completed only restarts the service.
+
+`--endpoint` defaults to `$SERVERCHIEF_ENDPOINT`, then `https://server.chief.app/agent/v1`. `--ca-file` (or `$SERVERCHIEF_CA_FILE`) adds a PEM CA to the trusted roots for a local development backend; its absolute path is stored in `identity.json`, so `serverchief run` trusts it too.
+
 ### Run the daemon
 
 ```bash
 sudo serverchief run                                          # systemd: logs to the journal
 sudo serverchief run --log-file /var/log/serverchief/agent.log  # SysV: size-capped file log
-serverchief run --config ./config.json --state-dir ./state      # unprivileged development run
+serverchief run --config ./config.json --state-dir ./state      # development run with local state
 ```
 
-`SIGINT` and `SIGTERM` stop the daemon gracefully. `SIGHUP` (`systemctl reload serverchief`) reloads the configuration, reopens the log file and collects every dataset again.
+Without `identity.json` the daemon exits with "not enrolled, run `serverchief setup <token>`". Otherwise it:
 
-Every key in `/etc/serverchief/config.json` is optional:
+- heartbeats right away and then every `intervals.heartbeat` seconds (±10%), reporting the hashes and seq the backend acknowledged. Datasets listed in `resync` are sent in full at once, and a changed `config_etag` triggers `GET /config` with `If-None-Match`.
+- collects each dataset the backend enabled on its backend-provided interval and batches the due, changed datasets into one envelope with a persisted, increasing `seq`. `packages` is sent as a delta against the last acknowledged payload once the backend has one. Collector failures go in the envelope's `errors` map whenever they change. Hashes advance only for datasets listed in `accepted` with the hash that was sent. Datasets the backend `ignored` are not sent again until its configuration changes.
+- subscribes to `private-agent.server_<id>.generation_<n>` when the configuration has a `realtime` block, authorising the channel with its credential. `config.updated` fetches the configuration, and `inventory.requested` collects every dataset and pushes what changed. Without `realtime` it polls only.
+- follows the protocol's error table: `401 revoked`/`unauthenticated` stops every loop and exits with status 2, which the systemd unit does not restart (`RestartPreventExitStatus=2`). `426` pauses inventory and heartbeats hourly. `429` and `503` honour `Retry-After`. `400`, `404`, `413` and `422` are logged and not retried unchanged. Other `5xx` and network errors back off exponentially (2 s doubling to 5 min, with jitter).
+
+`SIGINT` and `SIGTERM` stop the daemon gracefully. `SIGHUP` (`systemctl reload serverchief`) reloads the local configuration, reopens the log file and collects every dataset again.
+
+Every key in `/etc/serverchief/config.json` is optional. These operator overrides win over the backend's intervals, and `datasets` can only narrow what the backend enabled:
 
 ```json
 {
@@ -90,13 +115,25 @@ Every key in `/etc/serverchief/config.json` is optional:
 }
 ```
 
-### Set up
+State lives in `/var/lib/serverchief`: `state.json` (seq, acknowledged seq and hashes, last reported errors), `server-config.json` (the backend configuration with its ETag) and `payloads/` (delta bases). Every file is replaced atomically (temporary file, fsync, rename).
+
+### End-to-end test against a local backend
+
+The Server Chief app runs locally at `https://server.chief.test` under Laravel Valet, whose CA is `~/.config/valet/CA/LaravelValetCASelfSigned.pem`. Create a server in the local app, copy its token, then enroll a container. Under OrbStack, containers reach the Mac's Valet through `host.orb.internal`; `--add-host server.chief.test:host-gateway` maps the app's hostname to that address (0.250.250.254), or pass the IPv4 address of `host.orb.internal` explicitly:
 
 ```bash
-sudo serverchief setup <token>
+./bin/build.sh dev linux-arm64
+
+docker run --rm -it \
+  --add-host server.chief.test:host-gateway \
+  -v "$PWD/serverchief-linux-arm64:/usr/bin/serverchief:ro" \
+  -v "$HOME/.config/valet/CA/LaravelValetCASelfSigned.pem:/valet-ca.pem:ro" \
+  ubuntu:16.04 sh -c '
+    serverchief setup --endpoint https://server.chief.test/agent/v1 --ca-file /valet-ca.pem scenr_… &&
+    serverchief run'
 ```
 
-This command currently checks for root, a supported platform and a well-formed `scenr_…` token, then reports that it is not implemented yet. Until the backend exists, start the service by hand: run `systemctl enable --now serverchief`, or on SysV hosts run `update-rc.d serverchief defaults` or `chkconfig --add serverchief`, followed by `service serverchief start`.
+The container has no init system, so setup prints the manual-start hint and `serverchief run` runs in the foreground. The realtime host (`socket.chieftools.cloud`) is public and needs no extra mapping. Without a container, run both commands as root on a Linux VM with the same `--add-host`-style `/etc/hosts` entry.
 
 ## Datasets
 
@@ -106,6 +143,10 @@ This command currently checks for root, a supported platform and a well-formed `
 | `hardware` | CPU vendor, model, sockets, cores, threads and flags; RAM and swap totals; block devices with partitions; mounted storage file systems with size and inode totals | `/proc/cpuinfo` (x86 and ARM layouts, ARM implementer/part names), sysfs CPU topology, `/proc/meminfo`, `/sys/block`, `/proc/mounts` + `statfs(2)` |
 | `network` | interfaces (kind, MAC, MTU, state, virtual flag), addresses with scope, default IPv4 and IPv6 routes | `/sys/class/net`, `net.Interfaces()`, `/proc/net/route`, `/proc/net/ipv6_route`, `/proc/net/if_inet6` |
 | `resolvers` | nameservers, search domains and options in file order, the managing tool, systemd-resolved upstreams behind the 127.0.0.53 stub | `/etc/resolv.conf`, `/run/systemd/resolve/resolv.conf` |
+| `packages` (optional) | `{manager: dpkg\|rpm, items: [{name, version, arch, source?, versions?}]}` sorted by the delta key `manager/name/arch`; `versions` lists every installed version of rpm installonly packages such as `kernel-core` | `/var/lib/dpkg/status` parsed directly (fully installed packages only); `rpm -qa --queryformat` with an explicit format including the epoch. `gpg-pubkey` entries are skipped. Collected early when the package database mtime changes. |
+| `updates` (optional) | `{manager: apt\|yum\|dnf, items: [{name, current_version, candidate_version, arch, security}], security_count, reboot_required, cache_age_seconds}` | `apt-get -s -o Debug::NoLocking=1 dist-upgrade` (works on 14.04+, unlike `apt list`; security from `-security` pockets); `yum`/`dnf -C check-update` and `updateinfo list security`; `/var/run/reboot-required`, `needs-restarting -r`. `reboot_required` is null when unknown. |
+
+`packages` and `updates` are only collected when the backend enables them (planned for protocol 1.1.0) or when selected with `serverchief collect -d`. They never refresh package metadata: no `apt-get update`, no `makecache`. Without a yum/dnf metadata cache, `updates` reports an error that says so. `dist-upgrade` rather than `upgrade` is simulated so that updates held back by new dependencies, such as kernel meta packages, are counted.
 
 Address scopes are `public`, `private` (RFC 1918 and IPv6 ULA `fc00::/7`), `shared` (carrier-grade NAT `100.64.0.0/10`), `loopback`, `link-local`, `multicast`, `unspecified` and `reserved` (documentation, benchmarking and other special-purpose ranges).
 
@@ -113,8 +154,6 @@ Payloads hold only values that are stable while the server is unchanged: capacit
 
 ### Planned collectors
 
-- [ ] `packages`: dpkg status database and `rpm -qa --queryformat`, sent as deltas (`inventory.Diff`), triggered by package database mtime changes.
-- [ ] `updates`: `apt list --upgradable` with origin and pocket, `yum`/`dnf updateinfo`, `/var/run/reboot-required` and `needs-restarting`, using the existing metadata cache by default.
 - [ ] `software`: normalized products (PHP, MySQL/MariaDB, nginx, Apache, OpenSSL, Node.js, …) from packages and panel builds (`/opt/plesk/php/*`, DirectAdmin custombuild, `ea-php*`, `/opt/php-*`).
 - [ ] `vhosts`: Apache (`apachectl -S`), nginx (`nginx -T`), Plesk and DirectAdmin, with docroot, PHP handler and certificate expiry.
 - [ ] `location`: cloud metadata endpoints (Hetzner, AWS, DigitalOcean, GCP, Azure, OVH) and a manual override.
@@ -126,11 +165,11 @@ main.go          signal handling, embedded fallback CA roots
 cmd/             cobra CLI: version, collect, run, setup
 collector/       Collector interface, registry and the built-in collectors
 inventory/       canonical JSON, SHA-256 hashes, envelope, keyed-list deltas, state store
-agent/           daemon loop, config, client interface, enrollment types, HTTP client
+agent/           protocol client, enrollment, daemon loop, settings, realtime glue
 initsys/         init system detection plus systemd and SysV service managers
 logging/         stdlib log setup and a size-capped rotating file writer
 systemdnotify/   sd_notify(3) for Type=notify
-pusher/          Pusher-protocol websocket client for realtime wake-ups (not wired up yet)
+pusher/          Pusher-protocol websocket client for realtime wake-ups
 packaging/       systemd unit, LSB init script, shared deb/rpm maintainer scripts
 bin/             build scripts
 ```
@@ -138,11 +177,10 @@ bin/             build scripts
 - **Host abstraction:** collectors read the host only through `collector.Host`, which holds an `fs.FS` rooted at `/` plus function fields for live-only sources (`uname`, `statfs`, `net.Interfaces`, DNS). Tests point it at fixtures under `collector/testdata/`. Some of those fixtures were copied verbatim from the official Docker images.
 - **Hashing:** `inventory.Canonical` encodes payloads with sorted object keys and no insignificant whitespace. Payloads implement `inventory.Normalizer` to sort lists whose order carries no meaning. The dataset hash is the SHA-256 of that encoding.
 - **Envelope:** each upload is `{seq, datasets: {name: {hash, mode: full|delta, base_hash, payload}}, errors}`. `seq` is persisted before use and increases forever. `errors` reports collectors that failed in that round.
-- **Delivery:** the daemon schedules each dataset on its own interval with ±10% jitter and uploads only the datasets whose hash differs from the last delivered one. `/var/lib/serverchief/state.json` records those hashes and is replaced atomically (temporary file, fsync, rename). A failed delivery leaves the state untouched and retries with exponential backoff, capped at 5 minutes. A `409 resync` answer makes the agent forget that dataset's hash so the next upload sends it in full.
+- **Delivery:** the daemon schedules each dataset on its own interval with ±10% jitter and uploads only the datasets whose hash differs from the one the backend acknowledged. A failed delivery leaves the state untouched; how it is retried follows the protocol's error table. A `resync` (from a heartbeat or an inventory answer) makes the agent forget that dataset's hash and payload so it goes out in full right away. If the backend answers with a higher `seq` than the agent sent (state lost or reinstalled), the agent continues from there and resends.
 - **Init systems:** the package ships both `serverchief.service` and `/etc/init.d/serverchief` and depends on neither init system. The maintainer scripts check for `/run/systemd/system` at runtime. The SysV script uses `start-stop-daemon` when available and otherwise falls back to `setsid` with a pid file (RHEL-likes).
-- **TLS:** old distributions ship stale CA bundles. The agent's HTTP client therefore trusts the system roots plus the embedded Mozilla bundle from `golang.org/x/crypto/x509roots/fallback`.
-
-The agent ↔ backend protocol (enrollment with generation fencing, heartbeat, inventory, commands and realtime wake-ups) follows the Backup Chief agent. Its types are in `agent/types.go`. The HTTP client is a TODO until the backend's `/agent/v1` endpoints exist.
+- **TLS:** old distributions ship stale CA bundles. The agent's HTTP client and the realtime websocket therefore trust the system roots plus the embedded Mozilla bundle from `golang.org/x/crypto/x509roots/fallback`, plus the `--ca-file` CA when one was given at setup.
+- **Protocol:** every request carries `ServerChief-Protocol-Revision: 1.0.0`, `User-Agent: serverchief-agent/<version> (linux; <arch>)` and, except `POST /enroll`, `Authorization: Bearer <credential>`. Bodies above 8 KiB are gzipped. Errors are decoded from `application/problem+json` into `agent.ProblemError`. The channel-auth request only ever goes to the enrolled endpoint's origin. The protocol types are in `agent/types.go` and the tests replay the spec's fixtures from `agent/testdata/protocol/`.
 
 ## Development
 

@@ -43,11 +43,27 @@ func TestRegistry(t *testing.T) {
 
 func TestDefaultRegistryDatasets(t *testing.T) {
 	registry := Default(&Host{FS: fstest.MapFS{}})
-	if names := registry.Names(); !reflect.DeepEqual(names, []string{"hardware", "network", "resolvers", "system"}) {
+	if names := registry.Names(); !reflect.DeepEqual(names, []string{"hardware", "network", "packages", "resolvers", "system", "updates"}) {
 		t.Fatalf("Names() = %v", names)
 	}
-	// Every collector must cope with a host that has none of its sources.
-	for _, name := range registry.Names() {
+	if names := registry.DefaultNames(); !reflect.DeepEqual(names, []string{"hardware", "network", "resolvers", "system"}) {
+		t.Fatalf("DefaultNames() = %v", names)
+	}
+	if selected, _ := registry.Select(nil); len(selected) != 4 {
+		t.Fatalf("Select(nil) returned %d collectors; optional ones must be asked for", len(selected))
+	}
+	if selected, err := registry.Select([]string{"packages", "updates"}); err != nil || len(selected) != 2 {
+		t.Fatalf("Select(packages, updates) = %v, %v", selected, err)
+	}
+	// The optional collectors report a missing package manager.
+	for _, name := range []string{"packages", "updates"} {
+		collector, _ := registry.Get(name)
+		if _, err := collector.Collect(context.Background()); err == nil || !strings.Contains(err.Error(), "no supported package manager") {
+			t.Errorf("%s on an empty host: %v", name, err)
+		}
+	}
+	// Every default collector must cope with a host that has none of its sources.
+	for _, name := range registry.DefaultNames() {
 		collector, _ := registry.Get(name)
 		if _, err := collector.Collect(context.Background()); err != nil {
 			t.Errorf("%s on an empty host: %v", name, err)

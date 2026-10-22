@@ -1,0 +1,243 @@
+{
+  "collected_at": "2026-10-22T14:00:00Z",
+  "datasets": {
+    "hardware": {
+      "hash": "a890c037f87a2721483976db58177bc4d4b434a1d38583683ac1f7a00eb16be3",
+      "mode": "full",
+      "payload": {
+        "block_devices": [
+          {
+            "model": "",
+            "name": "vda",
+            "partitions": [],
+            "read_only": true,
+            "removable": false,
+            "rotational": true,
+            "size_bytes": 430211072,
+            "type": "virtio",
+            "vendor": ""
+          },
+          {
+            "model": "",
+            "name": "vdb",
+            "partitions": [
+              {
+                "name": "vdb1",
+                "size_bytes": 994662416384
+              }
+            ],
+            "read_only": false,
+            "removable": false,
+            "rotational": true,
+            "size_bytes": 994663481856,
+            "type": "virtio",
+            "vendor": ""
+          },
+          {
+            "model": "",
+            "name": "vdc",
+            "partitions": [],
+            "read_only": false,
+            "removable": false,
+            "rotational": true,
+            "size_bytes": 1073741824,
+            "type": "virtio",
+            "vendor": ""
+          }
+        ],
+        "cpu": {
+          "cores": 14,
+          "flags": [
+            "aes",
+            "afp",
+            "asimd",
+            "asimddp",
+            "asimdfhm",
+            "asimdhp",
+            "asimdrdm",
+            "atomics",
+            "bf16",
+            "cpuid",
+            "crc32",
+            "dcpodp",
+            "dcpop",
+            "dit",
+            "ecv",
+            "evtstrm",
+            "fcma",
+            "flagm",
+            "flagm2",
+            "fp",
+            "fphp",
+            "frint",
+            "i8mm",
+            "ilrcpc",
+            "jscvt",
+            "lrcpc",
+            "pmull",
+            "rpres",
+            "sb",
+            "sha1",
+            "sha2",
+            "sha3",
+            "sha512",
+            "uscat"
+          ],
+          "model": "Apple part 0x000",
+          "sockets": 1,
+          "threads": 14,
+          "vendor": "Apple"
+        },
+        "filesystems": [
+          {
+            "device": "overlay",
+            "mount_point": "/",
+            "network": false,
+            "read_only": false,
+            "size_bytes": 89523224576,
+            "total_inodes": 0,
+            "type": "overlay"
+          },
+          {
+            "device": "mac",
+            "mount_point": "/b",
+            "network": false,
+            "read_only": true,
+            "size_bytes": 994662584320,
+            "total_inodes": 738858032,
+            "type": "virtiofs"
+          }
+        ],
+        "memory": {
+          "swap_total_bytes": 17892012032,
+          "total_bytes": 16818278400
+        }
+      }
+    },
+    "network": {
+      "hash": "65df6948f9c72d08ee4bbf18543df64fc119c08361d4b73bc1a33d012f5fe799",
+      "mode": "full",
+      "payload": {
+        "default_routes": [
+          {
+            "family": "ipv4",
+            "gateway": "192.168.215.1",
+            "interface": "eth0",
+            "metric": 0
+          },
+          {
+            "family": "ipv6",
+            "gateway": "fd07:b51a:cc66:1::1",
+            "interface": "eth0",
+            "metric": 1024
+          }
+        ],
+        "interfaces": [
+          {
+            "addresses": [
+              {
+                "address": "192.168.215.2",
+                "family": "ipv4",
+                "prefix_len": 24,
+                "scope": "private"
+              },
+              {
+                "address": "fd07:b51a:cc66:1::2",
+                "family": "ipv6",
+                "prefix_len": 64,
+                "scope": "private"
+              },
+              {
+                "address": "fe80::cc31:2aff:fe64:86bf",
+                "family": "ipv6",
+                "prefix_len": 64,
+                "scope": "link-local"
+              }
+            ],
+            "kind": "virtual",
+            "mac": "ce:31:2a:64:86:bf",
+            "mtu": 1500,
+            "name": "eth0",
+            "state": "up",
+            "virtual": true
+          },
+          {
+            "addresses": [
+              {
+                "address": "127.0.0.1",
+                "family": "ipv4",
+                "prefix_len": 8,
+                "scope": "loopback"
+              },
+              {
+                "address": "::1",
+                "family": "ipv6",
+                "prefix_len": 128,
+                "scope": "loopback"
+              }
+            ],
+            "kind": "loopback",
+            "mac": "",
+            "mtu": 65536,
+            "name": "lo",
+            "state": "unknown",
+            "virtual": true
+          }
+        ]
+      }
+    },
+    "resolvers": {
+      "hash": "05956c5cc21442782a8fca0d1a7ae88e07bbd5e4154b77562153119da46cfbaf",
+      "mode": "full",
+      "payload": {
+        "managed_by": "docker",
+        "nameservers": [
+          "0.250.250.200"
+        ],
+        "options": [],
+        "search": [],
+        "systemd_resolved": null
+      }
+    },
+    "system": {
+      "hash": "e2c059a6a87f64c6b9e22edb9fecf2ead94bd21e0e27e248265d157b7afbf73e",
+      "mode": "full",
+      "payload": {
+        "agent_arch": "arm64",
+        "arch": "arm64",
+        "boot_id": "bed4ebb9-ade1-4d27-9dba-d99fe2d28d42",
+        "boot_time": "2026-10-18T09:42:17Z",
+        "fqdn": "81057e258b52",
+        "hostname": "81057e258b52",
+        "init": "sysv",
+        "kernel": {
+          "machine": "aarch64",
+          "name": "Linux",
+          "release": "7.2.9-orbstack-00391-g2b298d05fbd4",
+          "version": "#1 SMP PREEMPT Mon Oct 12 05:39:36 UTC 2026"
+        },
+        "os": {
+          "codename": "xenial",
+          "family": "debian",
+          "id": "ubuntu",
+          "id_like": [
+            "debian"
+          ],
+          "name": "Ubuntu",
+          "pretty_name": "Ubuntu 16.04.7 LTS",
+          "source": "/etc/os-release",
+          "version": "16.04",
+          "version_full": "16.04.7"
+        },
+        "timezone": "Etc/UTC",
+        "virtualization": {
+          "product": "",
+          "role": "container",
+          "technology": "docker",
+          "vendor": ""
+        }
+      }
+    }
+  },
+  "seq": 1
+}
