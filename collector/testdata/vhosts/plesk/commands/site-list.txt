@@ -1,0 +1,5 @@
+example.com
+shop.example.com
+customer.nl
+static.customer.nl
+xn--bcher-kva.example

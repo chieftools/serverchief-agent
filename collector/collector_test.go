@@ -43,7 +43,7 @@ func TestRegistry(t *testing.T) {
 
 func TestDefaultRegistryDatasets(t *testing.T) {
 	registry := Default(&Host{FS: fstest.MapFS{}})
-	if names := registry.Names(); !reflect.DeepEqual(names, []string{"hardware", "network", "packages", "resolvers", "system", "updates"}) {
+	if names := registry.Names(); !reflect.DeepEqual(names, []string{"cloud", "hardware", "network", "packages", "resolvers", "system", "updates", "vhosts"}) {
 		t.Fatalf("Names() = %v", names)
 	}
 	if names := registry.DefaultNames(); !reflect.DeepEqual(names, []string{"hardware", "network", "resolvers", "system"}) {
@@ -55,7 +55,14 @@ func TestDefaultRegistryDatasets(t *testing.T) {
 	if selected, err := registry.Select([]string{"packages", "updates"}); err != nil || len(selected) != 2 {
 		t.Fatalf("Select(packages, updates) = %v, %v", selected, err)
 	}
-	// The optional collectors report a missing package manager.
+	// cloud and vhosts cope with a host that has none of their sources.
+	for _, name := range []string{"cloud", "vhosts"} {
+		collector, _ := registry.Get(name)
+		if _, err := collector.Collect(context.Background()); err != nil {
+			t.Errorf("%s on an empty host: %v", name, err)
+		}
+	}
+	// The package collectors report a missing package manager.
 	for _, name := range []string{"packages", "updates"} {
 		collector, _ := registry.Get(name)
 		if _, err := collector.Collect(context.Background()); err == nil || !strings.Contains(err.Error(), "no supported package manager") {

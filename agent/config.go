@@ -30,6 +30,9 @@ var DefaultIntervals = map[string]time.Duration{
 	"hardware":  time.Hour,
 	"packages":  time.Hour,
 	"updates":   6 * time.Hour,
+	"vhosts":    15 * time.Minute,
+	// cloud is also collected at agent start, like every enabled dataset.
+	"cloud": 24 * time.Hour,
 }
 
 // DefaultHeartbeatInterval is how often the agent checks in.

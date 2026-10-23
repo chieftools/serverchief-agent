@@ -60,6 +60,9 @@ type Host struct {
 	Command func(ctx context.Context, name string, args ...string) (CommandResult, error)
 	// Now is the clock for ages such as the package cache age.
 	Now func() time.Time
+	// Metadata reaches cloud metadata services. nil limits the cloud
+	// dataset to DMI.
+	Metadata *Metadata
 }
 
 // CommandResult is the outcome of Host.Command.
@@ -82,6 +85,7 @@ func NewHost(root string) *Host {
 		LookupCNAME: net.DefaultResolver.LookupCNAME,
 		Command:     systemCommand,
 		Now:         time.Now,
+		Metadata:    NewMetadata(),
 	}
 	host.Uname = systemUname
 	host.Statfs = func(mountPoint string) (FSStats, error) {
@@ -94,6 +98,7 @@ func NewHost(root string) *Host {
 		host.Interfaces = nil
 		host.LookupCNAME = nil
 		host.Command = nil
+		host.Metadata = nil
 	}
 	return host
 }

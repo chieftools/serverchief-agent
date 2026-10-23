@@ -1,0 +1,2 @@
+alice.example.net=type=alias
+alice-old.example=type=pointer

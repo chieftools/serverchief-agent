@@ -1,0 +1,178 @@
+# configuration file /etc/nginx/nginx.conf:
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+error_log /var/log/nginx/error.log;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+	worker_connections 768;
+	# multi_accept on;
+}
+
+http {
+
+	##
+	# Basic Settings
+	##
+
+	sendfile on;
+	tcp_nopush on;
+	types_hash_max_size 2048;
+	# server_tokens off;
+
+	include /etc/nginx/mime.types;
+	default_type application/octet-stream;
+
+	##
+	# SSL Settings
+	##
+
+	ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3; # Dropping SSLv3, ref: POODLE
+	ssl_prefer_server_ciphers on;
+
+	access_log /var/log/nginx/access.log;
+	gzip on;
+
+	upstream php82 {
+		server unix:/run/php/php8.2-fpm.sock;
+	}
+
+	include /etc/nginx/conf.d/*.conf;
+	include /etc/nginx/sites-enabled/*;
+}
+
+stream {
+	include /etc/nginx/streams-enabled/*.conf;
+}
+
+# configuration file /etc/nginx/modules-enabled/50-mod-http-geoip2.conf:
+load_module modules/ngx_http_geoip2_module.so;
+
+# configuration file /etc/nginx/mime.types:
+
+types {
+    text/html                             html htm shtml;
+    text/css                              css;
+    application/javascript                js;
+}
+
+# configuration file /etc/nginx/sites-enabled/default:
+##
+# You should look at the following URL's in order to grasp a solid understanding
+# of Nginx configuration files in order to fully unleash the power of Nginx.
+##
+
+# Default server configuration
+#
+server {
+	listen 80 default_server;
+	listen [::]:80 default_server;
+
+	root /var/www/html;
+
+	# Add index.php to the list if you are using PHP
+	index index.html index.htm index.nginx-debian.html;
+
+	server_name _;
+
+	location / {
+		# First attempt to serve request as file, then
+		# as directory, then fall back to displaying a 404.
+		try_files $uri $uri/ =404;
+	}
+}
+
+# configuration file /etc/nginx/sites-enabled/example.com:
+server {
+	listen 80;
+	listen [::]:80;
+	server_name example.com www.example.com;
+	return 301 https://$host$request_uri;
+}
+
+server {
+	listen 443 ssl http2;
+	listen [::]:443 ssl http2;
+	server_name example.com www.example.com *.cdn.example.com;
+
+	root /var/www/example.com/public/;
+	index index.php index.html;
+
+	ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+	ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
+	location / {
+		try_files $uri $uri/ /index.php?$query_string;
+	}
+
+	location ~ \.php$ {
+		include snippets/fastcgi-php.conf;
+		fastcgi_pass unix:/run/php/php8.2-fpm.sock;
+	}
+
+	location ~ /\.(?!well-known).* {
+		deny all;
+	}
+}
+
+# configuration file /etc/nginx/snippets/fastcgi-php.conf:
+# regex to split $uri to $fastcgi_script_name and $fastcgi_path
+fastcgi_split_path_info ^(.+?\.php)(/.*)$;
+
+# Check that the PHP script exists before passing it
+try_files $fastcgi_script_name =404;
+
+# Bypass the fact that try_files resets $fastcgi_path_info
+# see: http://trac.nginx.org/nginx/ticket/321
+set $path_info $fastcgi_path_info;
+fastcgi_param PATH_INFO $path_info;
+
+fastcgi_index index.php;
+include fastcgi.conf;
+
+# configuration file /etc/nginx/fastcgi.conf:
+
+fastcgi_param  SCRIPT_FILENAME    $document_root$fastcgi_script_name;
+fastcgi_param  QUERY_STRING       $query_string;
+fastcgi_param  REQUEST_METHOD     $request_method;
+
+# configuration file /etc/nginx/sites-enabled/api.example.org:
+server {
+	listen 8443 ssl;
+	listen 127.0.0.1:8080;
+	server_name API.Example.org "~^api-(?<region>[a-z]+)\.example\.org$";
+	ssl_certificate "/etc/nginx/ssl/api.example.org.pem";
+	ssl_certificate_key "/etc/nginx/ssl/api.example.org.key";
+
+	location / {
+		root /srv/api/public;
+		fastcgi_pass php82;
+		include fastcgi_params;
+	}
+}
+
+# configuration file /etc/nginx/sites-enabled/legacy:
+server {
+	server_name legacy.example.net "";
+	location / {
+		root /srv/legacy;
+	}
+	location ~ \.php$ {
+		fastcgi_pass 127.0.0.1:9000;
+	}
+}
+
+server {
+	listen 80;
+	server_name "";
+	return 444;
+}
+
+# configuration file /etc/nginx/streams-enabled/mysql.conf:
+server {
+	listen 3306;
+	server_name db.example.org;
+	proxy_pass 10.0.0.5:3306;
+}
+

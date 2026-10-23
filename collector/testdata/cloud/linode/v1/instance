@@ -1,0 +1,1 @@
+{"id": 12345678, "host_uuid": "5d2c4d3a9a4f4b7e8c1b2a3f4e5d6c7b", "label": "linode12345678", "region": "nl-ams", "type": "g6-nanode-1", "tags": [], "specs": {"vcpus": 1, "memory": 1024, "gpus": 0, "transfer": 1000, "disk": 25600}, "backups": {"enabled": false, "status": null}, "image": {"id": "linode/debian12", "label": "Debian 12"}}

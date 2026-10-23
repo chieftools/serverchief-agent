@@ -1,0 +1,5 @@
+1	example.com	example.com	/var/www/vhosts/example.com/httpdocs	true	plesk-php82-fpm	true	@CERT_HEX@
+2	shop.example.com	example.com	/var/www/vhosts/example.com/shop.example.com	true	plesk-php74-fastcgi	false	NULL
+3	Customer.NL	customer.nl	/var/www/vhosts/customer.nl/httpdocs/	false	plesk-php83-fpm	false	NULL
+4	static.customer.nl	customer.nl	/var/www/vhosts/customer.nl/static	true	fpm	true	NULL
+7	xn--bcher-kva.example	xn--bcher-kva.example	/var/www/vhosts/xn--bcher-kva.example/httpdocs	true	plesk-php81-cgi	false	NULL

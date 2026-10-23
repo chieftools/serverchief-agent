@@ -1,0 +1,28 @@
+VirtualHost configuration:
+*:443                  is a NameVirtualHost
+         default server example.com (/etc/apache2/sites-enabled/example.com.conf:12)
+         port 443 namevhost example.com (/etc/apache2/sites-enabled/example.com.conf:12)
+                 alias www.example.com
+         port 443 namevhost shop.example.org (/etc/apache2/sites-enabled/shop.example.org.conf:1)
+                 wild alias *.shop.example.org
+*:80                   is a NameVirtualHost
+         default server web-01.example.net (/etc/apache2/sites-enabled/000-default.conf:1)
+         port 80 namevhost web-01.example.net (/etc/apache2/sites-enabled/000-default.conf:1)
+         port 80 namevhost example.com (/etc/apache2/sites-enabled/example.com.conf:1)
+                 alias www.example.com
+ServerRoot: "/etc/apache2"
+Main DocumentRoot: "/var/www/html"
+Main ErrorLog: "/var/log/apache2/error.log"
+Mutex fcgid-proctbl: using_defaults
+Mutex ssl-stapling: using_defaults
+Mutex ssl-cache: using_defaults
+Mutex default: dir="/var/run/apache2/" mechanism=default 
+Mutex mpm-accept: using_defaults
+Mutex watchdog-callback: using_defaults
+Mutex rewrite-map: using_defaults
+Mutex ssl-stapling-refresh: using_defaults
+PidFile: "/var/run/apache2/apache2.pid"
+Define: DUMP_VHOSTS
+Define: DUMP_RUN_CFG
+User: name="www-data" id=33
+Group: name="www-data" id=33

@@ -1,21 +1,25 @@
 {
   "datasets": [
-    "system",
+    "cloud",
     "hardware",
     "network",
-    "resolvers",
     "packages",
-    "updates"
+    "resolvers",
+    "system",
+    "updates",
+    "vhosts"
   ],
   "etag": "\"c1-5f3a9e\"",
   "intervals": {
     "datasets": {
+      "cloud": 86400,
       "hardware": 3600,
       "network": 300,
       "packages": 3600,
       "resolvers": 300,
       "system": 300,
-      "updates": 21600
+      "updates": 21600,
+      "vhosts": 900
     },
     "heartbeat": 300
   },

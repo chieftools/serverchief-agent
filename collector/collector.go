@@ -54,8 +54,8 @@ func NewRegistry() *Registry {
 }
 
 // Default returns a registry with every built-in collector bound to host.
-// packages and updates are optional: they are collected only when selected
-// explicitly or enabled by the backend.
+// packages, updates, cloud and vhosts are optional: they are collected only
+// when selected explicitly or enabled by the backend.
 func Default(host *Host) *Registry {
 	registry := NewRegistry()
 	registry.MustRegister(NewSystem(host))
@@ -64,6 +64,8 @@ func Default(host *Host) *Registry {
 	registry.MustRegister(NewResolvers(host))
 	registry.MustRegisterOptional(NewPackages(host))
 	registry.MustRegisterOptional(NewUpdates(host))
+	registry.MustRegisterOptional(NewCloud(host))
+	registry.MustRegisterOptional(NewVHosts(host))
 	return registry
 }
 

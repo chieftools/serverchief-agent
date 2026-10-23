@@ -1,0 +1,1 @@
+{"droplet_id": 2756294, "hostname": "web-01", "region": "ams3", "user_data": "#!/bin/sh\necho secret\n"}

@@ -1,0 +1,28 @@
+VirtualHost configuration:
+*:443                  www.example.net (/etc/httpd/conf.d/ssl.conf:12)
+*:80                   is a NameVirtualHost
+         default server www.example.net (/etc/httpd/conf.d/example.net.conf:1)
+         port 80 namevhost www.example.net (/etc/httpd/conf.d/example.net.conf:1)
+                 alias example.net
+         port 80 namevhost legacy.example.net (/etc/httpd/conf.d/legacy.conf:3)
+ServerRoot: "/etc/httpd"
+Main DocumentRoot: "/var/www/html"
+Main ErrorLog: "/etc/httpd/logs/error_log"
+Mutex proxy: using_defaults
+Mutex authn-socache: using_defaults
+Mutex ssl-cache: using_defaults
+Mutex default: dir="/etc/httpd/run/" mechanism=default 
+Mutex cache-socache: using_defaults
+Mutex authdigest-opaque: using_defaults
+Mutex watchdog-callback: using_defaults
+Mutex proxy-balancer-shm: using_defaults
+Mutex rewrite-map: using_defaults
+Mutex ssl-stapling-refresh: using_defaults
+Mutex authdigest-client: using_defaults
+Mutex lua-ivm-shm: using_defaults
+Mutex ssl-stapling: using_defaults
+PidFile: "/etc/httpd/run/httpd.pid"
+Define: DUMP_VHOSTS
+Define: DUMP_RUN_CFG
+User: name="apache" id=48
+Group: name="apache" id=48

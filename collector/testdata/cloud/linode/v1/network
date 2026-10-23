@@ -1,0 +1,1 @@
+{"interfaces": [], "ipv4": {"public": ["172.105.0.10/32"], "private": [], "shared": []}, "ipv6": {"slaac": "2a01:7e01::f03c:94ff:fe12:3456/128", "ranges": [], "link_local": "fe80::f03c:94ff:fe12:3456/128", "shared_ranges": []}}

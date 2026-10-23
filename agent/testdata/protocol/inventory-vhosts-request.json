@@ -1,0 +1,56 @@
+{
+  "collected_at": "2026-10-23T10:45:00Z",
+  "datasets": {
+    "cloud": {
+      "hash": "6bfd41c7185ce205bc60dd3e26e909a03f5cd7cedcc11be6fb622b3a802ef5b5",
+      "mode": "full",
+      "payload": {
+        "instance_id": "71234567",
+        "instance_type": null,
+        "provider": "hetzner",
+        "public_ipv4": "203.0.113.10",
+        "public_ipv6": "2001:db8:1234::1",
+        "region": "fsn1",
+        "source": "metadata",
+        "zone": "fsn1-dc14"
+      }
+    },
+    "vhosts": {
+      "hash": "854a28d37cc9e66bd6196a846bdb0803b80332c2d18838d89a2a22fe9169ac06",
+      "mode": "full",
+      "payload": {
+        "items": [
+          {
+            "aliases": [
+              "www.shop.example.test"
+            ],
+            "certificate": {
+              "issuer": "shop.example.test",
+              "names": [
+                "shop.example.test",
+                "www.shop.example.test"
+              ],
+              "not_after": "2027-01-21T10:42:07Z",
+              "subject": "shop.example.test"
+            },
+            "config_file": "/etc/apache2/sites-enabled/shop.conf",
+            "document_root": "/var/www/shop/public",
+            "name": "shop.example.test",
+            "owner": null,
+            "php": {
+              "handler": "fpm",
+              "version": "8.2"
+            },
+            "ports": [
+              80,
+              443
+            ],
+            "source": "apache",
+            "ssl": true
+          }
+        ]
+      }
+    }
+  },
+  "seq": 7
+}

@@ -1,0 +1,22 @@
+availability-zone: fsn1-dc14
+hostname: web-01
+instance-id: 42
+local-ipv4: ''
+network-config:
+  config:
+  - mac_address: 96:00:00:00:00:01
+    name: eth0
+    subnets:
+    - ipv4: true
+      type: dhcp
+    - address: 2a01:4f8:c17:1234::1/64
+      gateway: fe80::1
+      ipv6: true
+      type: static
+    type: physical
+  version: 1
+public-ipv4: 116.203.0.10
+public-keys:
+- ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyOnly admin@example.com
+region: eu-central
+vendor_data: "#cloud-config\nruncmd:\n- [touch, /root/.vendor-data]\n"
