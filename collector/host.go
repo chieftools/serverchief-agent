@@ -26,8 +26,7 @@ type Uname struct {
 
 // FSStats holds the stable part of statfs(2) for one mount point.
 type FSStats struct {
-	SizeBytes   uint64
-	TotalInodes uint64
+	SizeBytes uint64
 }
 
 // NetInterface is the subset of net.Interface plus addresses that the

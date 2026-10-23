@@ -44,13 +44,12 @@ type Partition struct {
 
 // Filesystem is a mounted, storage-backed file system.
 type Filesystem struct {
-	Device      string `json:"device"`
-	MountPoint  string `json:"mount_point"`
-	Type        string `json:"type"`
-	ReadOnly    bool   `json:"read_only"`
-	Network     bool   `json:"network"`
-	SizeBytes   uint64 `json:"size_bytes"`
-	TotalInodes uint64 `json:"total_inodes"`
+	Device     string `json:"device"`
+	MountPoint string `json:"mount_point"`
+	Type       string `json:"type"`
+	ReadOnly   bool   `json:"read_only"`
+	Network    bool   `json:"network"`
+	SizeBytes  uint64 `json:"size_bytes"`
 }
 
 // Normalize sorts the unordered lists for canonical encoding.
@@ -337,7 +336,6 @@ func (host *Host) readFilesystems() []Filesystem {
 		}
 		if stats, err := host.Statfs(filesystems[index].MountPoint); err == nil {
 			filesystems[index].SizeBytes = stats.SizeBytes
-			filesystems[index].TotalInodes = stats.TotalInodes
 		}
 	}
 	return filesystems

@@ -36,7 +36,6 @@ func systemStatfs(path string) (FSStats, error) {
 		return FSStats{}, err
 	}
 	return FSStats{
-		SizeBytes:   uint64(stats.Blocks) * uint64(stats.Bsize),
-		TotalInodes: uint64(stats.Files),
+		SizeBytes: uint64(stats.Blocks) * uint64(stats.Bsize),
 	}, nil
 }

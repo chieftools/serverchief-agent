@@ -78,7 +78,7 @@ func TestHardwareCollect(t *testing.T) {
 		if path == "/boot/efi" {
 			return FSStats{}, errors.New("permission denied")
 		}
-		return FSStats{SizeBytes: 42 << 30, TotalInodes: 1000}, nil
+		return FSStats{SizeBytes: 42 << 30}, nil
 	}
 	payload, err := NewHardware(host).Collect(context.Background())
 	if err != nil {
@@ -107,11 +107,11 @@ func TestHardwareCollect(t *testing.T) {
 	}
 
 	wantFilesystems := []Filesystem{
-		{Device: "/dev/sda1", MountPoint: "/", Type: "ext4", SizeBytes: 42 << 30, TotalInodes: 1000},
+		{Device: "/dev/sda1", MountPoint: "/", Type: "ext4", SizeBytes: 42 << 30},
 		{Device: "/dev/sda15", MountPoint: "/boot/efi", Type: "vfat"},
-		{Device: "/dev/vda", MountPoint: "/mnt/My Backups", Type: "xfs", ReadOnly: true, SizeBytes: 42 << 30, TotalInodes: 1000},
+		{Device: "/dev/vda", MountPoint: "/mnt/My Backups", Type: "xfs", ReadOnly: true, SizeBytes: 42 << 30},
 		{Device: "nas.example.net:/export/backup", MountPoint: "/mnt/nfs", Type: "nfs4", Network: true},
-		{Device: "/dev/vda", MountPoint: "/var/lib/mysql", Type: "xfs", SizeBytes: 42 << 30, TotalInodes: 1000},
+		{Device: "/dev/vda", MountPoint: "/var/lib/mysql", Type: "xfs", SizeBytes: 42 << 30},
 	}
 	if !reflect.DeepEqual(info.Filesystems, wantFilesystems) {
 		t.Errorf("filesystems =\n%#v\nwant\n%#v", info.Filesystems, wantFilesystems)
