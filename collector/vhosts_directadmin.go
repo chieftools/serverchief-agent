@@ -97,9 +97,10 @@ func directAdminDomain(run *vhostRun, user, userDir, home, domain string, option
 	item.DocumentRoot = &root
 	if item.SSL {
 		item.Ports = append(item.Ports, 443)
-		// Only <domain>.cert is read: .key is the private key, and
-		// .combined may bundle the key with the chain.
-		item.Certificate = run.certificate(base + ".cert")
+		// Only <domain>.cert and the CA chain in <domain>.cacert are read:
+		// .key is the private key, and .combined may bundle the key with
+		// the chain.
+		item.Certificate = run.certificate(VHostSourceDirectAdmin, base+".cert", base+".cacert", directAdminLetsEncrypt(host, domain, base, config))
 	}
 	if !strings.EqualFold(config["php"], "off") {
 		item.PHP = directAdminPHP(config, options)
@@ -131,6 +132,30 @@ func directAdminDomain(run *vhostRun, user, userDir, home, domain string, option
 		}
 	}
 	return items
+}
+
+// directAdminLetsEncrypt returns the certificate manager of a domain whose
+// certificate DirectAdmin's Let's Encrypt integration renews: letsencrypt=1
+// in <domain>.conf, or the <domain>.cert.creation_time or
+// <domain>.san_config files it writes. It is nil otherwise.
+func directAdminLetsEncrypt(host *Host, domain, base string, config map[string]string) *CertificateManager {
+	evidence := ""
+	switch {
+	case config["letsencrypt"] == "1":
+		evidence = base + ".conf"
+	case host.exists(base + ".cert.creation_time"):
+		evidence = base + ".cert.creation_time"
+	case host.exists(base + ".san_config"):
+		evidence = base + ".san_config"
+	default:
+		return nil
+	}
+	return &CertificateManager{
+		Tool:    optionalString(CertificateToolDirectAdmin),
+		Name:    optionalString(domain),
+		Renewal: optionalString(CertificateRenewalPanel),
+		Config:  optionalString(evidence),
+	}
 }
 
 // directAdminPHP resolves php<N>_select (default 1) through custombuild's

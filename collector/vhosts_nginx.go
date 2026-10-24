@@ -499,7 +499,7 @@ func nginxServer(server nginxDirective, defaults nginxServerDefaults, config ngi
 			certificate = defaults.certificate
 		}
 		if certificate != "" && !strings.HasPrefix(certificate, "data:") {
-			item.Certificate = run.certificate(absoluteFrom(config.confPrefix, certificate))
+			item.Certificate = run.certificate(VHostSourceNginx, absoluteFrom(config.confPrefix, certificate), "", nil)
 		}
 	}
 

@@ -1,0 +1,214 @@
+{
+  "collected_at": "2026-10-24T09:30:00Z",
+  "datasets": {
+    "certificates": {
+      "hash": "b323fc7b4137ac8452ce3edf98bdbcadee0ed13a39be140aef1ed70a00e3db1b",
+      "mode": "full",
+      "payload": {
+        "items": [
+          {
+            "chain": {
+              "complete": true,
+              "intermediates": 1
+            },
+            "fingerprint": "3f6c1a9e0b7d4c2a8e5f1b3d7a9c0e2f4b6d8a1c3e5f7b9d0a2c4e6f8b1d3a5c",
+            "issuer": {
+              "cn": "R11",
+              "org": "Let's Encrypt"
+            },
+            "key": {
+              "bits": 256,
+              "curve": "P-256",
+              "type": "ecdsa"
+            },
+            "managed_by": {
+              "ca": "letsencrypt",
+              "ca_url": "https://acme-v02.api.letsencrypt.org/directory",
+              "config": "/etc/letsencrypt/renewal/shop.example.test.conf",
+              "installer": "apache",
+              "key_type": "ecdsa",
+              "name": "shop.example.test",
+              "plugin": "dns-domainchief",
+              "renewal": "timer",
+              "tool": "certbot"
+            },
+            "names": [
+              "shop.example.test",
+              "www.shop.example.test"
+            ],
+            "not_after": "2027-01-21T10:42:07Z",
+            "not_before": "2026-10-23T10:42:08Z",
+            "paths": [
+              "/etc/letsencrypt/live/shop.example.test/fullchain.pem"
+            ],
+            "self_signed": false,
+            "serial": "04a1b2c3d4e5f60718293a4b5c6d7e8f9a0b",
+            "signature_algorithm": "ECDSA-SHA384",
+            "subject": {
+              "cn": "shop.example.test",
+              "org": null
+            },
+            "used_by": [
+              {
+                "kind": "site",
+                "ref": "apache/shop.example.test"
+              }
+            ]
+          },
+          {
+            "chain": {
+              "complete": true,
+              "intermediates": 1
+            },
+            "fingerprint": "8d2e4f6a0c1b3d5e7f9a2b4c6d8e0f1a3b5c7d9e2f4a6b8c0d1e3f5a7b9c2d4e",
+            "issuer": {
+              "cn": "ZeroSSL RSA Domain Secure Site CA",
+              "org": "ZeroSSL"
+            },
+            "key": {
+              "bits": 2048,
+              "curve": null,
+              "type": "rsa"
+            },
+            "managed_by": {
+              "ca": "zerossl",
+              "ca_url": "https://acme.zerossl.com/v2/DV90",
+              "config": "/root/.acme.sh/mail.example.test/mail.example.test.conf",
+              "installer": null,
+              "key_type": "2048",
+              "name": "mail.example.test",
+              "plugin": "dns_cf",
+              "renewal": "cron",
+              "tool": "acme.sh"
+            },
+            "names": [
+              "mail.example.test"
+            ],
+            "not_after": "2026-12-01T00:00:00Z",
+            "not_before": "2026-09-02T00:00:00Z",
+            "paths": [
+              "/etc/ssl/mail/fullchain.pem"
+            ],
+            "self_signed": false,
+            "serial": "6f1e2d3c4b5a69788796a5b4c3d2e1f0",
+            "signature_algorithm": "SHA384-RSA",
+            "subject": {
+              "cn": "mail.example.test",
+              "org": null
+            },
+            "used_by": [
+              {
+                "kind": "dovecot",
+                "ref": "dovecot"
+              },
+              {
+                "kind": "postfix",
+                "ref": "postfix"
+              }
+            ]
+          },
+          {
+            "chain": {
+              "complete": null,
+              "intermediates": 0
+            },
+            "fingerprint": "c7a9e1b3d5f70a2c4e6b8d0f1a3c5e7b9d2f4a6c8e0b1d3f5a7c9e2b4d6f8a0c",
+            "issuer": {
+              "cn": "legacy.example.test",
+              "org": "Example Test Ltd"
+            },
+            "key": {
+              "bits": 1024,
+              "curve": null,
+              "type": "rsa"
+            },
+            "managed_by": null,
+            "names": [
+              "legacy.example.test"
+            ],
+            "not_after": "2026-11-02T12:00:00Z",
+            "not_before": "2024-11-02T12:00:00Z",
+            "paths": [
+              "/etc/ssl/certs/legacy.example.test.pem"
+            ],
+            "self_signed": true,
+            "serial": "01",
+            "signature_algorithm": "SHA256-RSA",
+            "subject": {
+              "cn": "legacy.example.test",
+              "org": "Example Test Ltd"
+            },
+            "used_by": [
+              {
+                "kind": "site",
+                "ref": "nginx/legacy.example.test"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "vhosts": {
+      "hash": "7fff4d73187a61d232f732a5c7ed00e11207ec3d331734a009444eebef42d429",
+      "mode": "full",
+      "payload": {
+        "items": [
+          {
+            "aliases": [
+              "www.shop.example.test"
+            ],
+            "certificate": {
+              "fingerprint": "3f6c1a9e0b7d4c2a8e5f1b3d7a9c0e2f4b6d8a1c3e5f7b9d0a2c4e6f8b1d3a5c",
+              "issuer": "R11",
+              "names": [
+                "shop.example.test",
+                "www.shop.example.test"
+              ],
+              "not_after": "2027-01-21T10:42:07Z",
+              "subject": "shop.example.test"
+            },
+            "config_file": "/etc/apache2/sites-enabled/shop.conf",
+            "document_root": "/var/www/shop/public",
+            "name": "shop.example.test",
+            "owner": null,
+            "php": {
+              "handler": "fpm",
+              "version": "8.2"
+            },
+            "ports": [
+              80,
+              443
+            ],
+            "source": "apache",
+            "ssl": true
+          },
+          {
+            "aliases": [
+              "old.legacy.example.test"
+            ],
+            "certificate": {
+              "fingerprint": "c7a9e1b3d5f70a2c4e6b8d0f1a3c5e7b9d2f4a6c8e0b1d3f5a7c9e2b4d6f8a0c",
+              "issuer": "legacy.example.test",
+              "names": [
+                "legacy.example.test"
+              ],
+              "not_after": "2026-11-02T12:00:00Z",
+              "subject": "legacy.example.test"
+            },
+            "config_file": "/etc/nginx/sites-enabled/legacy",
+            "document_root": "/var/www/legacy",
+            "name": "legacy.example.test",
+            "owner": null,
+            "php": null,
+            "ports": [
+              443
+            ],
+            "source": "nginx",
+            "ssl": true
+          }
+        ]
+      }
+    }
+  },
+  "seq": 12
+}

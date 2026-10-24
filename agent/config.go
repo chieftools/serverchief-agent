@@ -31,6 +31,9 @@ var DefaultIntervals = map[string]time.Duration{
 	"packages":  time.Hour,
 	"updates":   6 * time.Hour,
 	"vhosts":    15 * time.Minute,
+	// certificates is also collected early when renewal or certificate
+	// directories change.
+	"certificates": time.Hour,
 	// cloud is also collected at agent start, like every enabled dataset.
 	"cloud": 24 * time.Hour,
 }

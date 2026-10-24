@@ -176,7 +176,7 @@ func collectApache(ctx context.Context, run *vhostRun) ([]VHost, error) {
 		}
 		item.PHP = block.php
 		if item.SSL && block.certificate != "" {
-			item.Certificate = run.certificate(absoluteFrom(dump.serverRoot, block.certificate))
+			item.Certificate = run.certificate(VHostSourceApache, absoluteFrom(dump.serverRoot, block.certificate), absoluteFrom(dump.serverRoot, block.chain), nil)
 		}
 		items = append(items, item)
 	}
@@ -267,7 +267,10 @@ type apacheBlock struct {
 	ssl          bool
 	documentRoot string
 	certificate  string
-	php          *VHostPHP
+	// chain is SSLCertificateChainFile, whose intermediates complete the
+	// certificate's chain.
+	chain string
+	php   *VHostPHP
 	// aliases come from ServerAlias: apachectl -S lists them only for
 	// addresses with several name-based vhosts.
 	aliases []string
@@ -360,6 +363,8 @@ func (parser *apacheParser) directives(content []string, block *apacheBlock, dep
 			block.ssl = strings.EqualFold(argument, "on")
 		case directive == "sslcertificatefile" && block.certificate == "":
 			block.certificate = argument
+		case directive == "sslcertificatechainfile" && block.chain == "":
+			block.chain = argument
 		case directive == "include" || directive == "includeoptional":
 			if depth >= apacheIncludeDepth || argument == "" {
 				continue

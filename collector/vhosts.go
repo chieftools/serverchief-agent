@@ -1,11 +1,9 @@
 package collector
 
 import (
-	"bufio"
 	"cmp"
 	"context"
 	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -82,6 +80,26 @@ type VHostCertificate struct {
 	Issuer   string   `json:"issuer"`
 	NotAfter string   `json:"not_after"`
 	Names    []string `json:"names"`
+	// Fingerprint is the SHA-256 of the leaf's DER, lowercase hex: the
+	// key of the certificate in the certificates dataset.
+	Fingerprint string `json:"fingerprint"`
+
+	// source tells the certificates dataset where the certificate is
+	// configured; it is not sent.
+	source *certificateSource
+}
+
+// certificateSource is where a site's certificate is configured: a file
+// with an optional chain file, or inline PEM (Plesk's database).
+type certificateSource struct {
+	path  string
+	chain string
+	// inline holds certificates that do not come from a file, leaf first;
+	// inlineChain their intermediates.
+	inline      []*x509.Certificate
+	inlineChain []*x509.Certificate
+	// managed is what the panel says about the certificate's renewal.
+	managed *CertificateManager
 }
 
 // VHostKey is the delta key: source/name.
@@ -155,6 +173,18 @@ const (
 	vhostChangeLimit = 20000
 )
 
+// vhostSnapshotMaxAge bounds how old a vhosts collection may be for the
+// certificates dataset to reuse it instead of collecting again.
+const vhostSnapshotMaxAge = 30 * time.Minute
+
+// vhostSnapshot is the last successful collection, with the change token
+// taken before it.
+type vhostSnapshot struct {
+	token string
+	at    time.Time
+	items []VHost
+}
+
 // VHosts collects the vhosts dataset from Apache, nginx, Plesk and
 // DirectAdmin.
 //
@@ -171,10 +201,14 @@ type VHosts struct {
 	// warned holds each source's last logged warnings, so a lasting
 	// condition (a missing include) is logged once, not every run.
 	warned map[string]string
+	// store holds the parsed certificate files, shared with the
+	// certificates dataset.
+	store    *certificateStore
+	snapshot *vhostSnapshot
 }
 
 func NewVHosts(host *Host) *VHosts {
-	return &VHosts{host: host, last: make(map[string][]VHost), warned: make(map[string]string)}
+	return &VHosts{host: host, last: make(map[string][]VHost), warned: make(map[string]string), store: newCertificateStore()}
 }
 
 func (*VHosts) Name() string { return "vhosts" }
@@ -186,15 +220,21 @@ func (*VHosts) DeltaKeyFields() []string { return []string{"source", "name"} }
 // and sizes of the entries in the web server and panel configuration trees,
 // up to vhostChangeDepth levels deep.
 func (collector *VHosts) ChangeToken() string {
-	host := collector.host
 	digest := fnv.New64a()
-	for _, root := range vhostChangeRoots {
+	treeDigest(digest, collector.host, vhostChangeRoots, vhostChangeDepth, vhostChangeLimit)
+	return fmt.Sprintf("%016x", digest.Sum64())
+}
+
+// treeDigest writes the names, modification times and sizes of the entries
+// under roots, up to depth levels deep and limit entries per root.
+func treeDigest(digest io.Writer, host *Host, roots []string, depth, limit int) {
+	for _, root := range roots {
 		count := 0
 		_ = fs.WalkDir(host.FS, relative(root), func(name string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
-			if count++; count > vhostChangeLimit {
+			if count++; count > limit {
 				return fs.SkipAll
 			}
 			info, err := entry.Info()
@@ -202,20 +242,42 @@ func (collector *VHosts) ChangeToken() string {
 				return nil
 			}
 			fmt.Fprintf(digest, "%s\x00%d\x00%d\n", name, info.ModTime().UnixNano(), info.Size())
-			if entry.IsDir() && strings.Count(strings.TrimPrefix(name, relative(root)), "/") >= vhostChangeDepth {
+			if entry.IsDir() && strings.Count(strings.TrimPrefix(name, relative(root)), "/") >= depth {
 				return fs.SkipDir
 			}
 			return nil
 		})
 	}
-	return fmt.Sprintf("%016x", digest.Sum64())
+}
+
+// recent returns the items of a collection that is at most
+// vhostSnapshotMaxAge old and whose configuration has not changed since,
+// collecting again otherwise. The certificates dataset uses it to find the
+// sites' certificates without running apachectl and plesk db again.
+func (collector *VHosts) recent(ctx context.Context) ([]VHost, error) {
+	token := collector.ChangeToken()
+	collector.mu.Lock()
+	snapshot := collector.snapshot
+	collector.mu.Unlock()
+	if snapshot != nil && snapshot.token == token && collector.host.now().Sub(snapshot.at) < vhostSnapshotMaxAge {
+		return snapshot.items, nil
+	}
+	payload, err := collector.Collect(ctx)
+	if err != nil {
+		if snapshot != nil && ctx.Err() == nil {
+			return snapshot.items, err
+		}
+		return nil, err
+	}
+	return payload.(*VHostsInfo).Items, nil
 }
 
 func (collector *VHosts) Collect(ctx context.Context) (any, error) {
+	token := collector.ChangeToken()
 	collector.mu.Lock()
 	defer collector.mu.Unlock()
 
-	run := &vhostRun{host: collector.host, certificates: make(map[string]*VHostCertificate), warnings: make(map[string][]string)}
+	run := &vhostRun{host: collector.host, store: collector.store, certificates: make(map[string]*VHostCertificate), warnings: make(map[string][]string)}
 	info := &VHostsInfo{Items: []VHost{}}
 	var failures []string
 	present := 0
@@ -253,12 +315,14 @@ func (collector *VHosts) Collect(ctx context.Context) (any, error) {
 		return nil, errors.New(strings.Join(failures, "; "))
 	}
 	info.Normalize()
+	collector.snapshot = &vhostSnapshot{token: token, at: collector.host.now(), items: slices.Clone(info.Items)}
 	return info, nil
 }
 
 // vhostRun holds per-collection caches shared by the sources.
 type vhostRun struct {
 	host         *Host
+	store        *certificateStore
 	certificates map[string]*VHostCertificate
 	warnings     map[string][]string
 }
@@ -342,86 +406,54 @@ func mergeVHosts(source string, items []VHost) []VHost {
 	return result
 }
 
-// certificate parses the first certificate of a PEM file, or returns nil.
-// Results are cached per path for the collection.
-func (run *vhostRun) certificate(name string) *VHostCertificate {
+// certificate returns the public facts of the first certificate in a PEM
+// file, or nil. chain is the configured chain file, if any, and managed
+// what the panel says about renewal. Results are cached per path and chain
+// for the collection, and the parsed files across collections.
+func (run *vhostRun) certificate(source, name, chain string, managed *CertificateManager) *VHostCertificate {
 	if name == "" || strings.Contains(name, "$") {
 		return nil
 	}
-	if cached, ok := run.certificates[name]; ok {
+	if strings.Contains(chain, "$") {
+		chain = ""
+	}
+	key := name + "\x00" + chain
+	if cached, ok := run.certificates[key]; ok {
 		return cached
 	}
-	certificate := run.host.readCertificateFile(name)
-	run.certificates[name] = certificate
+	file := run.store.load(run.host, name)
+	if warning := certificateWarning(name, file.err); warning != "" {
+		run.warn(source, warning)
+	}
+	var certificate *VHostCertificate
+	if leaf := file.leaf(); leaf != nil {
+		certificate = vhostCertificate(leaf)
+		certificate.source = &certificateSource{path: name, chain: chain, managed: managed}
+	}
+	run.certificates[key] = certificate
 	return certificate
 }
 
-// maxCertificateFile bounds how much of a certificate file is scanned.
-const maxCertificateFile = 1 << 20
-
-// readCertificateFile scans a PEM file line by line and keeps only the
-// lines of its first CERTIFICATE block. Some panels (Plesk) store the key
-// and the certificate in one file: other PEM blocks, such as a private key,
-// are skipped without being kept or decoded.
-func (host *Host) readCertificateFile(name string) *VHostCertificate {
-	file, err := host.FS.Open(relative(name))
-	if err != nil {
-		return nil
+// vhostCertificate summarises a leaf certificate for the vhosts dataset.
+func vhostCertificate(leaf *x509.Certificate) *VHostCertificate {
+	subject := leaf.Subject.CommonName
+	if subject == "" {
+		subject = leaf.Subject.String()
 	}
-	defer file.Close()
-
-	var block strings.Builder
-	inside := false
-	scanner := bufio.NewScanner(io.LimitReader(file, maxCertificateFile))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		switch {
-		case !inside && line == "-----BEGIN CERTIFICATE-----":
-			inside = true
-			block.WriteString(line + "\n")
-		case inside:
-			block.WriteString(line + "\n")
-			if line == "-----END CERTIFICATE-----" {
-				return parseCertificatePEM([]byte(block.String()))
-			}
-		}
+	issuer := leaf.Issuer.CommonName
+	if issuer == "" {
+		issuer = leaf.Issuer.String()
 	}
-	return nil
-}
-
-// parseCertificatePEM parses the first CERTIFICATE block of data.
-func parseCertificatePEM(data []byte) *VHostCertificate {
-	for {
-		var block *pem.Block
-		block, data = pem.Decode(data)
-		if block == nil {
-			return nil
-		}
-		if block.Type != "CERTIFICATE" {
-			continue
-		}
-		certificate, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return nil
-		}
-		subject := certificate.Subject.CommonName
-		if subject == "" {
-			subject = certificate.Subject.String()
-		}
-		issuer := certificate.Issuer.CommonName
-		if issuer == "" {
-			issuer = certificate.Issuer.String()
-		}
-		names := make([]string, 0, len(certificate.DNSNames))
-		for _, name := range certificate.DNSNames {
-			names = append(names, strings.ToLower(name))
-		}
-		return &VHostCertificate{
-			Subject:  subject,
-			Issuer:   issuer,
-			NotAfter: certificate.NotAfter.UTC().Format(time.RFC3339),
-			Names:    sortedUnique(names),
-		}
+	names := make([]string, 0, len(leaf.DNSNames))
+	for _, name := range leaf.DNSNames {
+		names = append(names, strings.ToLower(name))
+	}
+	return &VHostCertificate{
+		Subject:     subject,
+		Issuer:      issuer,
+		NotAfter:    leaf.NotAfter.UTC().Format(time.RFC3339),
+		Names:       sortedUnique(names),
+		Fingerprint: fingerprintOf(leaf),
 	}
 }
 

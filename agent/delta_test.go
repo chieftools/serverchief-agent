@@ -210,3 +210,128 @@ func TestPackagesManagerChangeIsSentInFull(t *testing.T) {
 		t.Fatalf("manager change produced a delta: %v %v", ok, err)
 	}
 }
+
+// TestCertificatesFixtureMatchesCollectorTypes decodes the spec's
+// certificates payload, and the vhosts payload that links to it by
+// fingerprint, into the collector types: re-encoding must reproduce the
+// fixture hashes.
+func TestCertificatesFixtureMatchesCollectorTypes(t *testing.T) {
+	var envelope inventory.Envelope
+	if err := json.Unmarshal(readFixture(t, "inventory-certificates-request.json"), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	targets := map[string]any{"certificates": &collector.CertificatesInfo{}, "vhosts": &collector.VHostsInfo{}}
+	for name, target := range targets {
+		dataset, ok := envelope.Datasets[name]
+		if !ok || dataset.Mode != inventory.ModeFull {
+			t.Fatalf("fixture lacks a full %s dataset", name)
+		}
+		if hash, err := inventory.HashValue(json.RawMessage(dataset.Payload)); err != nil || hash != dataset.Hash {
+			t.Fatalf("%s: canonical hash %s (%v), fixture says %s", name, hash, err, dataset.Hash)
+		}
+		decoder := json.NewDecoder(strings.NewReader(string(dataset.Payload)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(target); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if hash, err := inventory.HashValue(target); err != nil || hash != dataset.Hash {
+			t.Errorf("%s: collector type hashes to %s (%v), fixture says %s", name, hash, err, dataset.Hash)
+		}
+	}
+	certificates := targets["certificates"].(*collector.CertificatesInfo)
+	byFingerprint := map[string]collector.Certificate{}
+	for _, item := range certificates.Items {
+		byFingerprint[item.Fingerprint] = item
+	}
+	for _, site := range targets["vhosts"].(*collector.VHostsInfo).Items {
+		if site.Certificate == nil {
+			continue
+		}
+		item, ok := byFingerprint[site.Certificate.Fingerprint]
+		if !ok || !slices.ContainsFunc(item.UsedBy, func(use collector.CertificateUse) bool {
+			return use.Kind == collector.CertificateUseSite && use.Ref == collector.VHostKey(site)
+		}) {
+			t.Errorf("site %s does not link to its certificate", collector.VHostKey(site))
+		}
+	}
+	// The agent's own normalisation keeps the fixture as it is.
+	normalized := *certificates
+	normalized.Items = slices.Clone(certificates.Items)
+	normalized.Normalize()
+	if hash, _ := inventory.HashValue(&normalized); hash != envelope.Datasets["certificates"].Hash {
+		t.Error("Normalize reorders the fixture")
+	}
+}
+
+// TestCertificatesDeltaReproducesHashOnTheBackend builds a fingerprint-keyed
+// delta against the spec fixture and applies it the way the backend does.
+func TestCertificatesDeltaReproducesHashOnTheBackend(t *testing.T) {
+	var envelope inventory.Envelope
+	if err := json.Unmarshal(readFixture(t, "inventory-certificates-request.json"), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	fixture := envelope.Datasets["certificates"]
+	baseCanonical, err := inventory.Canonical(json.RawMessage(fixture.Payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var current collector.CertificatesInfo
+	if err := json.Unmarshal(fixture.Payload, &current); err != nil {
+		t.Fatal(err)
+	}
+	removed := current.Items[2].Fingerprint
+	current.Items = current.Items[:2]
+	current.Items[0].UsedBy = append(current.Items[0].UsedBy, collector.CertificateUse{Kind: collector.CertificateUsePostfix, Ref: "postfix"})
+	added := current.Items[1]
+	added.Fingerprint = strings.Repeat("0", 64)
+	current.Items = append(current.Items, added)
+	current.Normalize()
+	dataset, err := inventory.NewDataset("certificates", &current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delta, ok, err := buildDelta(baseCanonical, dataset.Canonical, (&collector.Certificates{}).DeltaKeyFields())
+	if err != nil || !ok {
+		t.Fatalf("no delta: %v %v", ok, err)
+	}
+	if !slices.Equal(delta.Removed, []string{removed}) || len(delta.Added) != 1 || len(delta.Changed) != 1 {
+		t.Fatalf("delta = %+v", delta)
+	}
+
+	// The backend's side: key by fingerprint, apply, sort by key.
+	var stored map[string]any
+	if err := json.Unmarshal(fixture.Payload, &stored); err != nil {
+		t.Fatal(err)
+	}
+	items := map[string]any{}
+	for _, element := range stored["items"].([]any) {
+		items[element.(map[string]any)["fingerprint"].(string)] = element
+	}
+	wire, _ := json.Marshal(delta)
+	var received struct {
+		Added   []map[string]any `json:"added"`
+		Removed []string         `json:"removed"`
+		Changed []map[string]any `json:"changed"`
+	}
+	if err := json.Unmarshal(wire, &received); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range received.Removed {
+		delete(items, key)
+	}
+	for _, item := range append(received.Changed, received.Added...) {
+		items[item["fingerprint"].(string)] = item
+	}
+	keys := make([]string, 0, len(items))
+	for key := range items {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	applied := make([]any, len(keys))
+	for index, key := range keys {
+		applied[index] = items[key]
+	}
+	if hash, err := inventory.HashValue(map[string]any{"items": applied}); err != nil || hash != dataset.Hash {
+		t.Fatalf("backend hash %s (%v), agent sent %s", hash, err, dataset.Hash)
+	}
+}

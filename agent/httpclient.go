@@ -9,30 +9,13 @@ import (
 	"os"
 	"time"
 
-	"golang.org/x/crypto/x509roots/fallback/bundle"
+	"go.chief.tools/serverchief-agent/trust"
 )
 
-// RootCAs returns the system roots plus the embedded Mozilla bundle. The
-// standard library only falls back to embedded roots when the system has
-// none at all; old distributions (Ubuntu 14.04, CentOS 7) do have a bundle,
-// it is just stale, so the embedded roots are added unconditionally.
+// RootCAs returns the system roots plus the embedded Mozilla bundle
+// (trust.Roots).
 func RootCAs() *x509.CertPool {
-	pool, err := x509.SystemCertPool()
-	if err != nil || pool == nil {
-		pool = x509.NewCertPool()
-	}
-	for root := range bundle.Roots() {
-		certificate, err := x509.ParseCertificate(root.Certificate)
-		if err != nil {
-			continue
-		}
-		if root.Constraint == nil {
-			pool.AddCert(certificate)
-		} else {
-			pool.AddCertWithConstraint(certificate, root.Constraint)
-		}
-	}
-	return pool
+	return trust.Roots()
 }
 
 // TLSConfig returns the TLS settings for backend and realtime connections:

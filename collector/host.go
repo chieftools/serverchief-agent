@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/x509"
 	"errors"
 	"io/fs"
 	"net"
@@ -76,6 +77,9 @@ type Host struct {
 	// succeeded, from its state directory; zero when never. nil means
 	// unknown.
 	MetadataRefreshedAt func() time.Time
+	// Roots returns the trust anchors that certificate chains are verified
+	// against. nil leaves chain completeness undetermined.
+	Roots func() *x509.CertPool
 }
 
 // CommandResult is the outcome of Host.Command.
@@ -99,6 +103,7 @@ func NewHost(root string) *Host {
 		Command:     systemCommand,
 		Now:         time.Now,
 		Metadata:    NewMetadata(),
+		Roots:       trustedRoots,
 	}
 	host.PackageLocks = pkglock.NewTracker()
 	host.Uname = systemUname

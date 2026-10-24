@@ -104,10 +104,14 @@ func pleskDomainsQuery(columns pleskColumns) (string, error) {
 		owner = "COALESCE(w.name, d.name)"
 		join += " LEFT JOIN domains w ON w.id = d.webspace_id AND d.webspace_id > 0"
 	}
-	certificate := "NULL"
+	certificate, certificateName, certificateChain := "NULL", "NULL", "NULL"
 	if columns.has("hosting", "certificate_id") && columns.has("certificates", "id") && columns.has("certificates", "cert") {
 		certificate = "HEX(c.cert)"
 		join += " LEFT JOIN certificates c ON c.id = h.certificate_id"
+		// The name tells Let's Encrypt certificates apart ("Lets Encrypt
+		// example.com"); ca_cert is the public CA chain.
+		certificateName = column("certificates", "name", "c.name")
+		certificateChain = column("certificates", "ca_cert", "HEX(c.ca_cert)")
 	}
 	fields := []string{
 		"d.id",
@@ -118,6 +122,8 @@ func pleskDomainsQuery(columns pleskColumns) (string, error) {
 		column("hosting", "php_handler_id", "h.php_handler_id"),
 		column("hosting", "ssl", "h.ssl"),
 		certificate,
+		certificateName,
+		certificateChain,
 	}
 	return "SELECT " + strings.Join(fields, ", ") + " FROM domains d JOIN hosting h ON h.dom_id = d.id" + join + " ORDER BY d.id", nil
 }
@@ -189,10 +195,11 @@ func pleskFromDatabase(ctx context.Context, run *vhostRun) ([]VHost, error) {
 
 	items := make([]VHost, 0, len(rows))
 	for _, row := range rows {
-		if len(row) != 8 || row[1] == "" {
+		if len(row) != 10 || row[1] == "" {
 			continue
 		}
 		id, name, owner, root, php, handler, ssl, certificate := row[0], strings.ToLower(row[1]), strings.ToLower(row[2]), row[3], row[4], row[5], row[6], row[7]
+		certificateName, certificateChain := row[8], row[9]
 		item := VHost{
 			Name:         name,
 			Aliases:      aliases[id],
@@ -207,7 +214,7 @@ func pleskFromDatabase(ctx context.Context, run *vhostRun) ([]VHost, error) {
 		if php != "false" {
 			item.PHP = pleskPHP(handler)
 		}
-		item.Certificate = pleskCertificate(certificate)
+		item.Certificate = pleskCertificate(certificate, certificateChain, certificateName)
 		if config := pleskVhostsSystem + "/" + name + "/conf/httpd.conf"; host.exists(config) {
 			item.ConfigFile = &config
 		}
@@ -217,14 +224,42 @@ func pleskFromDatabase(ctx context.Context, run *vhostRun) ([]VHost, error) {
 }
 
 // pleskCertificate parses the certificates.cert value of the domains
-// query. Plesk stores the public PEM form-encoded, with "+" for spaces and
-// "%0A" for line breaks:
+// query, with the certificate's ca_cert chain and name. Plesk stores the
+// public PEM form-encoded, with "+" for spaces and "%0A" for line breaks:
 //
 //	-----BEGIN+CERTIFICATE-----%0AMIIF…%0A-----END+CERTIFICATE-----%0A
 //
 // The query selects it as HEX(), but a plain value (from a query without
 // HEX, or a release that stores the PEM as is) is accepted too.
-func pleskCertificate(value string) *VHostCertificate {
+// Certificates named "Lets Encrypt <domain>" are renewed by Plesk's Let's
+// Encrypt extension (SSL It!).
+func pleskCertificate(value, chain, name string) *VHostCertificate {
+	certificates := parseCertificateBlocks(scanCertificatePEM(pleskPEM(value)))
+	if len(certificates) == 0 {
+		return nil
+	}
+	certificate := vhostCertificate(certificates[0])
+	certificate.source = &certificateSource{
+		inline:      certificates,
+		inlineChain: parseCertificateBlocks(scanCertificatePEM(pleskPEM(chain))),
+	}
+	if strings.HasPrefix(name, pleskLetsEncryptPrefix) {
+		certificate.source.managed = &CertificateManager{
+			Tool:    optionalString(CertificateToolPlesk),
+			Name:    optionalString(name),
+			Renewal: optionalString(CertificateRenewalPanel),
+		}
+	}
+	return certificate
+}
+
+// pleskLetsEncryptPrefix starts the names of the certificates Plesk's Let's
+// Encrypt extension issues.
+const pleskLetsEncryptPrefix = "Lets Encrypt "
+
+// pleskPEM decodes a hex and/or form-encoded PEM value from psa, or
+// returns nil.
+func pleskPEM(value string) []byte {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil
@@ -245,7 +280,7 @@ func pleskCertificate(value string) *VHostCertificate {
 		}
 		value = unescaped
 	}
-	return parseCertificatePEM([]byte(value))
+	return []byte(value)
 }
 
 // pleskPHP maps a php_handler_id to a version and handler:
