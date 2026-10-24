@@ -203,7 +203,7 @@ func TestPackagesFromRPM(t *testing.T) {
 			"bash":         {Name: "bash", Version: "4.2.46-34.el7", Arch: "x86_64"},
 			// Built from lvm2 with its own version; the epoch is the
 			// binary's.
-			"device-mapper": {Name: "device-mapper", Version: "7:1.02.170-6.el7", Arch: "x86_64", Source: "lvm2", SourceVersion: "7:2.02.187-6.el7"},
+			"device-mapper": {Name: "device-mapper", Version: "7:1.02.170-6.el7", Arch: "x86_64", Source: "lvm2", SourceVersion: "2.02.187-6.el7"},
 		}},
 		{"almalinux-9", "var/lib/rpm/rpmdb.sqlite", 158, map[string]Package{
 			"openssl-libs": {Name: "openssl-libs", Version: "1:3.5.8-1.el9_8", Arch: "aarch64", Source: "openssl"},

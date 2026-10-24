@@ -34,8 +34,8 @@ type Package struct {
 	Source string `json:"source,omitempty"`
 	// SourceVersion is the source package's version, when it differs from
 	// Version: dpkg's "Source: name (version)" (binNMUs, binaries with
-	// their own version), or rpm's SOURCERPM version-release with the
-	// binary's epoch.
+	// their own version), or rpm's SOURCERPM version-release, which has no
+	// epoch.
 	SourceVersion string `json:"source_version,omitempty"`
 	// Versions lists every installed version, ascending, when more than
 	// one is installed under the same name and arch (rpm installonly
@@ -232,13 +232,11 @@ func parseRPMQuery(data []byte) []Package {
 		if source != "" && source != item.Name {
 			item.Source = source
 		}
-		if sourceVersion != "" {
-			if epoch := rpmNone(parts[1]); epoch != "" && epoch != "0" {
-				sourceVersion = epoch + ":" + sourceVersion
-			}
-			if sourceVersion != item.Version {
-				item.SourceVersion = sourceVersion
-			}
+		// A source RPM's file name carries no epoch, and subpackages can have
+		// their own (perl 4: versus perl-Carp 0:), so the source version is
+		// sent without one and compared with the binary's version-release.
+		if sourceVersion != "" && sourceVersion != rpmEVR("", parts[2], parts[3]) {
+			item.SourceVersion = sourceVersion
 		}
 		packages = append(packages, item)
 	}
