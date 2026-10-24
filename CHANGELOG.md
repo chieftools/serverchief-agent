@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.1.0]
+
 ### Added
 
 - Added inventory of the operating system, hardware, network, DNS resolvers, packages, package repositories, cloud metadata, virtual hosts and certificates. Each dataset is hashed, and only datasets that changed are reported to Server Chief, in full or as a delta. See [Datasets](README.md#datasets).
@@ -16,4 +18,5 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/commits/main
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.1.0
