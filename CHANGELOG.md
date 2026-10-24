@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.1.1]
+
 ### Changed
 
 - Added the server ID to the agent's User-Agent once it is enrolled, as `serverchief-agent/<version> (linux; <arch>) server/<id>`, for both HTTP requests and the realtime connection. Logs and proxies in front of Server Chief can now tell which server sent a request.
@@ -22,5 +24,6 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.1.1
 [0.1.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.1.0
