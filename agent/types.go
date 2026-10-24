@@ -47,6 +47,9 @@ type Paths struct {
 	// Commands journals recently received commands, so a restart neither
 	// executes one twice nor loses its result.
 	Commands string
+	// MetadataRefresh records the agent's last successful package metadata
+	// refresh, which counts towards cache_updated_at.
+	MetadataRefresh string
 	// Log is the file log used on hosts without journald.
 	Log string
 }
@@ -61,7 +64,9 @@ func DefaultPaths() Paths {
 		ServerConfig: "/var/lib/serverchief/server-config.json",
 		Payloads:     "/var/lib/serverchief/payloads",
 		Commands:     "/var/lib/serverchief/commands.json",
-		Log:          "/var/log/serverchief/agent.log",
+
+		MetadataRefresh: "/var/lib/serverchief/metadata-refresh.json",
+		Log:             "/var/log/serverchief/agent.log",
 	}
 }
 
@@ -72,6 +77,7 @@ func (paths Paths) WithStateDirectory(directory string) Paths {
 	paths.ServerConfig = filepath.Join(directory, "server-config.json")
 	paths.Payloads = filepath.Join(directory, "payloads")
 	paths.Commands = filepath.Join(directory, "commands.json")
+	paths.MetadataRefresh = filepath.Join(directory, "metadata-refresh.json")
 	return paths
 }
 
@@ -134,6 +140,8 @@ type EnrollmentResponse struct {
 	Datasets         []string        `json:"datasets"`
 	Intervals        ServerIntervals `json:"intervals"`
 	Realtime         *Realtime       `json:"realtime"`
+	// PackageMetadataRefresh is optional here; GET /config carries it.
+	PackageMetadataRefresh *PackageMetadataRefresh `json:"package_metadata_refresh,omitempty"`
 }
 
 // ServerConfig returns the configuration embedded in the response.
@@ -143,6 +151,8 @@ func (response EnrollmentResponse) ServerConfig() ServerConfig {
 		Datasets:  response.Datasets,
 		Intervals: response.Intervals,
 		Realtime:  response.Realtime,
+
+		PackageMetadataRefresh: response.PackageMetadataRefresh,
 	}
 }
 
@@ -153,6 +163,16 @@ type ServerConfig struct {
 	// Datasets lists the datasets the backend wants. Others are not sent.
 	Datasets []string  `json:"datasets"`
 	Realtime *Realtime `json:"realtime"`
+	// PackageMetadataRefresh is absent (nil) for "enabled every 6 hours".
+	PackageMetadataRefresh *PackageMetadataRefresh `json:"package_metadata_refresh,omitempty"`
+}
+
+// PackageMetadataRefresh configures the agent's own apt-get update /
+// makecache.
+type PackageMetadataRefresh struct {
+	Enabled bool `json:"enabled"`
+	// Interval is in seconds.
+	Interval int `json:"interval"`
 }
 
 // ServerIntervals are in seconds.

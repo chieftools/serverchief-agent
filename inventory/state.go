@@ -325,3 +325,60 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 	}
 	return nil
 }
+
+// RefreshStamp records when the agent's own package metadata refresh last
+// succeeded, in the state directory. It belongs to the agent, so no file of
+// apt, yum or dnf is ever written for it.
+type RefreshStamp struct {
+	path string
+
+	mu sync.Mutex
+	at time.Time
+}
+
+type refreshStampFile struct {
+	RefreshedAt time.Time `json:"refreshed_at"`
+}
+
+// OpenRefreshStamp loads path. A missing file means "never"; an unreadable
+// one is returned as an error and also treated as never.
+func OpenRefreshStamp(path string) (*RefreshStamp, error) {
+	stamp := &RefreshStamp{path: path}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return stamp, nil
+	}
+	if err != nil {
+		return stamp, fmt.Errorf("read %s: %w", path, err)
+	}
+	var file refreshStampFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return stamp, fmt.Errorf("decode %s: %w", path, err)
+	}
+	stamp.at = file.RefreshedAt.UTC().Truncate(time.Second)
+	return stamp, nil
+}
+
+// At returns the last recorded success, or zero.
+func (stamp *RefreshStamp) At() time.Time {
+	stamp.mu.Lock()
+	defer stamp.mu.Unlock()
+	return stamp.at
+}
+
+// Record atomically stores a success at whole-second precision, so the
+// updates hash moves only when a refresh succeeded.
+func (stamp *RefreshStamp) Record(at time.Time) error {
+	at = at.UTC().Truncate(time.Second)
+	data, err := json.Marshal(refreshStampFile{RefreshedAt: at})
+	if err != nil {
+		return err
+	}
+	if err := WriteFileAtomic(stamp.path, append(data, '\n'), 0o600); err != nil {
+		return err
+	}
+	stamp.mu.Lock()
+	defer stamp.mu.Unlock()
+	stamp.at = at
+	return nil
+}

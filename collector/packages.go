@@ -61,8 +61,8 @@ func (info *PackagesInfo) Normalize() {
 // missing from older rpm releases.
 const rpmQueryFormat = `%{NAME}\t%{EPOCH}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\t%{SOURCERPM}\n`
 
-// Package database locations. The first existing rpm database is used for
-// change detection.
+// Package database locations. The first existing one is what the daemon's
+// package activity trigger stats (PackageSystem.DatabaseToken).
 var (
 	dpkgStatusPath = "/var/lib/dpkg/status"
 	rpmDatabases   = []string{
@@ -88,12 +88,6 @@ func (*Packages) Name() string { return "packages" }
 // DeltaKeyFields implements KeyedDataset: manager comes from the payload's
 // top level, name and arch from each item.
 func (*Packages) DeltaKeyFields() []string { return []string{"manager", "name", "arch"} }
-
-// ChangeToken implements ChangeDetector with the package database's
-// modification time and size.
-func (collector *Packages) ChangeToken() string {
-	return collector.host.packageDatabaseToken()
-}
 
 func (collector *Packages) Collect(ctx context.Context) (any, error) {
 	host := collector.host

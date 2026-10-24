@@ -13,8 +13,15 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
+
+	"go.chief.tools/serverchief-agent/pkglock"
 )
+
+// commandWaitDelay is how long a cancelled command has between SIGTERM
+// and SIGKILL.
+const commandWaitDelay = 10 * time.Second
 
 // Uname mirrors the fields of uname(2) that collectors use.
 type Uname struct {
@@ -62,6 +69,13 @@ type Host struct {
 	// Metadata reaches cloud metadata services. nil limits the cloud
 	// dataset to DMI.
 	Metadata *Metadata
+	// PackageLocks inspects package-manager locks (never takes them). nil
+	// means no lock is ever held.
+	PackageLocks *pkglock.Tracker
+	// MetadataRefreshedAt is when the agent's own metadata refresh last
+	// succeeded, from its state directory; zero when never. nil means
+	// unknown.
+	MetadataRefreshedAt func() time.Time
 }
 
 // CommandResult is the outcome of Host.Command.
@@ -86,6 +100,7 @@ func NewHost(root string) *Host {
 		Now:         time.Now,
 		Metadata:    NewMetadata(),
 	}
+	host.PackageLocks = pkglock.NewTracker()
 	host.Uname = systemUname
 	host.Statfs = func(mountPoint string) (FSStats, error) {
 		return systemStatfs(filepath.Join(root, mountPoint))
@@ -98,6 +113,7 @@ func NewHost(root string) *Host {
 		host.LookupCNAME = nil
 		host.Command = nil
 		host.Metadata = nil
+		host.PackageLocks = nil
 	}
 	return host
 }
@@ -112,6 +128,10 @@ func (host *Host) OSRelease() OSRelease {
 func systemCommand(ctx context.Context, name string, args ...string) (CommandResult, error) {
 	command := exec.CommandContext(ctx, name, args...)
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", "LANGUAGE=C")
+	// On a timeout, give package managers a chance to clean up (yum's PID
+	// file, apt's partial downloads) before they are killed.
+	command.Cancel = func() error { return command.Process.Signal(syscall.SIGTERM) }
+	command.WaitDelay = commandWaitDelay
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr

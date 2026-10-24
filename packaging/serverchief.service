@@ -31,7 +31,12 @@ UMask=0077
 # Directives unknown to older systemd (CentOS 7 ships 219, Ubuntu 16.04
 # ships 229) are ignored with a warning, so the unit stays portable.
 # ProtectSystem=full keeps /usr, /boot and /etc read-only but leaves /var
-# writable, which package-manager queries (apt/yum caches and locks) need.
+# and /run writable, which package-manager queries (apt/yum caches and
+# locks) and the package metadata refresh need: apt-get update writes
+# /var/lib/apt/lists and /var/cache/apt, yum/dnf
+# makecache write /var/cache/{yum,dnf}, /var/lib/dnf, /var/log and
+# /run/yum.pid. No ReadWritePaths= is needed. The refresh runs under
+# `nice -n 19 ionice -c3`, below the agent's own priority.
 # Reading /etc, /var/lib/dpkg, /var/lib/rpm and panel directories such as
 # /usr/local/directadmin or /opt/psa is unaffected.
 ProtectSystem=full

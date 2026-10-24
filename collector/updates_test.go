@@ -116,10 +116,10 @@ func TestYumUpdatesCentOS7(t *testing.T) {
 		"var/cache/yum/x86_64/7/base/repomd.xml":     "",
 		"var/cache/yum/x86_64/7/updates/cachecookie": "",
 	}, map[string]fakeCommand{
-		"yum -C -q check-update":             {file: "check-update.txt", exit: 100},
-		"yum -C -q updateinfo list security": {file: "updateinfo-security.txt"},
-		"rpm -qa":                            {file: "rpm-qa.txt"},
-		"/usr/bin/needs-restarting -r":       {file: "needs-restarting.txt"},
+		"yum -C -q --setopt=exit_on_lock=True check-update":             {file: "check-update.txt", exit: 100},
+		"yum -C -q --setopt=exit_on_lock=True updateinfo list security": {file: "updateinfo-security.txt"},
+		"rpm -qa":                      {file: "rpm-qa.txt"},
+		"/usr/bin/needs-restarting -r": {file: "needs-restarting.txt"},
 	})
 	info := collectUpdates(t, host)
 	if info.Manager != ManagerYum || len(info.Items) != 51 || info.SecurityCount != 0 {
@@ -155,10 +155,10 @@ func TestDnfUpdatesAlmaLinux9(t *testing.T) {
 		"var/cache/dnf/baseos-09b2e93483836b7c/repodata/repomd.xml": "",
 	}
 	host, _ := fakeHost(t, "almalinux-9", files, map[string]fakeCommand{
-		"dnf -C -q check-update":               {file: "check-update.txt", exit: 100},
-		"dnf -C -q updateinfo list --security": {file: "updateinfo-security.txt"},
-		"rpm -qa":                              {file: "rpm-qa.txt"},
-		"/usr/bin/needs-restarting -r":         {file: "needs-restarting-required.txt", exit: 1},
+		"dnf -C -q --setopt=exit_on_lock=True check-update":               {file: "check-update.txt", exit: 100},
+		"dnf -C -q --setopt=exit_on_lock=True updateinfo list --security": {file: "updateinfo-security.txt"},
+		"rpm -qa":                      {file: "rpm-qa.txt"},
+		"/usr/bin/needs-restarting -r": {file: "needs-restarting-required.txt", exit: 1},
 	})
 	info := collectUpdates(t, host)
 	if info.Manager != ManagerDnf || len(info.Items) != 13 || info.SecurityCount != 10 {
@@ -180,10 +180,10 @@ func TestDnfUpdatesAlmaLinux9(t *testing.T) {
 	// Without a metadata cache dnf -C fails; the agent reports it rather
 	// than refreshing.
 	host, ran := fakeHost(t, "almalinux-9", files, map[string]fakeCommand{
-		"dnf -C -q check-update": {file: "check-update-nocache.txt", exit: 1},
+		"dnf -C -q --setopt=exit_on_lock=True check-update": {file: "check-update-nocache.txt", exit: 1},
 	})
 	_, err := NewUpdates(host).Collect(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "Cache-only enabled but no cache") || !strings.Contains(err.Error(), "never refreshes") {
+	if err == nil || !strings.Contains(err.Error(), "Cache-only enabled but no cache") || !strings.Contains(err.Error(), "package_metadata_refresh") {
 		t.Fatalf("no-cache error = %v", err)
 	}
 	if len(*ran) != 1 {

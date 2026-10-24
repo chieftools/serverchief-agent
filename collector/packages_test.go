@@ -319,15 +319,28 @@ func TestPackagesWithoutManager(t *testing.T) {
 	}
 }
 
-func TestPackagesChangeToken(t *testing.T) {
+func TestPackageDatabaseToken(t *testing.T) {
 	fsys := fstest.MapFS{"var/lib/dpkg/status": &fstest.MapFile{Data: []byte("x"), ModTime: time.Unix(100, 0)}}
-	packages := NewPackages(&Host{FS: fsys})
-	first := packages.ChangeToken()
+	system := NewPackageSystem(&Host{FS: fsys})
+	first := system.DatabaseToken()
 	fsys["var/lib/dpkg/status"] = &fstest.MapFile{Data: []byte("x"), ModTime: time.Unix(200, 0)}
-	if second := packages.ChangeToken(); first == "" || first == second {
+	if second := system.DatabaseToken(); first == "" || first == second {
 		t.Fatalf("tokens %q, %q", first, second)
 	}
-	if NewUpdates(&Host{FS: fsys}).ChangeToken() == "" {
-		t.Fatal("updates has no change token")
+	fsys["var/lib/dpkg/status"] = &fstest.MapFile{Data: []byte("xy"), ModTime: time.Unix(200, 0)}
+	if third := system.DatabaseToken(); third == first {
+		t.Fatal("size change not detected")
+	}
+	// The package database is the activity trigger's: neither collector
+	// polls it any more, so a long upgrade does not re-collect every minute.
+	if _, detects := any(NewPackages(&Host{FS: fsys})).(ChangeDetector); detects {
+		t.Fatal("packages still polls the package database")
+	}
+	rpm := NewPackageSystem(&Host{FS: fstest.MapFS{"var/lib/rpm/Packages": &fstest.MapFile{Data: []byte("x")}}})
+	if !strings.HasPrefix(rpm.DatabaseToken(), "/var/lib/rpm/Packages@") {
+		t.Fatalf("rpm token = %q", rpm.DatabaseToken())
+	}
+	if NewPackageSystem(&Host{FS: fstest.MapFS{}}).DatabaseToken() != "" {
+		t.Fatal("token without a package database")
 	}
 }

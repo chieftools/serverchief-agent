@@ -58,7 +58,14 @@ type RunOptions struct {
 	CollectTimeout time.Duration
 	// ChangePoll is how often ChangeDetector collectors are polled.
 	ChangePoll time.Duration
-	Now        func() time.Time
+	// Packages drives the package metadata refresh and the package
+	// activity trigger. Nil disables both.
+	Packages       PackageSystem
+	PackageTimings PackageTimings
+	// RecordRefresh persists a successful metadata refresh (the state
+	// directory's metadata-refresh.json) before updates is collected.
+	RecordRefresh func(time.Time) error
+	Now           func() time.Time
 	// Jitter returns a random duration in [0, maximum].
 	Jitter func(maximum time.Duration) time.Duration
 }
@@ -103,6 +110,9 @@ type daemon struct {
 	configWake   chan struct{}
 	realtimeKey  string
 	stopRealtime func()
+
+	// packages is the metadata refresh and package activity state.
+	packages packageWork
 }
 
 // Run heartbeats, collects datasets on their schedules and delivers changes
@@ -158,11 +168,17 @@ func newDaemon(options RunOptions) *daemon {
 		commandsWake:     make(chan struct{}, 1),
 		configWake:       make(chan struct{}, 1),
 		realtimeKey:      "unset",
+		packages: packageWork{
+			timings: options.PackageTimings.withDefaults(),
+			pollAt:  now,
+			done:    make(chan error, 1),
+		},
 	}
 	if daemon.commands == nil {
 		daemon.commands, _ = OpenCommandJournal("")
 	}
 	daemon.scheduleAll(now)
+	daemon.scheduleRefresh(now)
 	daemon.recoverCommands(now)
 	return daemon
 }
@@ -170,6 +186,7 @@ func newDaemon(options RunOptions) *daemon {
 func (daemon *daemon) loop(ctx context.Context) error {
 	options := daemon.options
 	ready := false
+	defer daemon.awaitRefresh()
 	for {
 		if err := daemon.tick(ctx); err != nil {
 			return daemon.stopped(ctx, err)
@@ -194,6 +211,7 @@ func (daemon *daemon) loop(ctx context.Context) error {
 			timer.Stop()
 			daemon.settings.local = config
 			daemon.scheduleAll(options.Now())
+			daemon.scheduleRefresh(options.Now())
 			daemon.pruneWaiters()
 			log.Printf("[config] reloaded; collecting %d datasets now", len(daemon.next))
 		case <-daemon.commandsWake:
@@ -203,6 +221,9 @@ func (daemon *daemon) loop(ctx context.Context) error {
 			timer.Stop()
 			daemon.configPending = true
 			daemon.configAt = options.Now()
+		case err := <-daemon.packages.done:
+			timer.Stop()
+			daemon.finishRefresh(err, options.Now())
 		}
 	}
 }
@@ -234,6 +255,9 @@ func (daemon *daemon) tick(ctx context.Context) error {
 		if err := daemon.sendAcks(ctx); err != nil {
 			return err
 		}
+	}
+	if !daemon.unsupported {
+		daemon.tickPackages(ctx, options.Now())
 	}
 	if !daemon.unsupported {
 		if due := daemon.due(options.Now()); len(due) > 0 {
@@ -281,6 +305,9 @@ func (daemon *daemon) wakeAt() time.Time {
 				wakeAt = at
 			}
 		}
+		if at := daemon.packagesWakeAt(); !at.IsZero() && at.Before(wakeAt) {
+			wakeAt = at
+		}
 	}
 	return wakeAt
 }
@@ -312,6 +339,7 @@ func (daemon *daemon) reschedule(now time.Time) {
 	if limit := now.Add(daemon.settings.Heartbeat()); !daemon.unsupported && daemon.heartbeatAt.After(limit) {
 		daemon.heartbeatAt = limit
 	}
+	daemon.scheduleRefresh(now)
 }
 
 func (daemon *daemon) due(now time.Time) []string {
@@ -553,6 +581,11 @@ func (daemon *daemon) pollChanges(now time.Time) {
 		if !ok {
 			continue
 		}
+		if name == datasetUpdates && daemon.packages.running {
+			// Our own refresh is moving the cache and holds the lock; its
+			// completion collects updates and records the new token.
+			continue
+		}
 		token := detector.ChangeToken()
 		if previous, seen := daemon.changeTokens[name]; seen && previous != token {
 			log.Printf("[collector] %s source changed; collecting now", name)
@@ -587,7 +620,15 @@ func (daemon *daemon) deliver(ctx context.Context, due []string) error {
 	}
 
 	daemon.inventoryBackoff = initialBackoff
-	daemon.settleInventory(due, nil, outcome.failures)
+	// A command that asked for a skipped dataset reports why.
+	commandFailures := maps.Clone(outcome.failures)
+	if len(outcome.deferred) > 0 {
+		if commandFailures == nil {
+			commandFailures = map[string]string{}
+		}
+		maps.Copy(commandFailures, outcome.deferred)
+	}
+	daemon.settleInventory(due, nil, commandFailures)
 	for _, name := range due {
 		if _, enabled := daemon.next[name]; enabled {
 			daemon.next[name] = now.Add(normalJitter(daemon.settings.Interval(name), JitterFraction, options.Jitter))
@@ -598,13 +639,21 @@ func (daemon *daemon) deliver(ctx context.Context, due []string) error {
 			daemon.next[name] = now
 		}
 	}
+	for name := range outcome.deferred {
+		if _, enabled := daemon.next[name]; enabled {
+			daemon.next[name] = now.Add(daemon.lockRetry())
+		}
+	}
 	return nil
 }
 
-// cycleOutcome lists datasets to send again right away and the collector
-// errors of the round.
+// cycleOutcome lists datasets to send again right away, datasets skipped
+// because a package manager was busy, and the collector errors of the
+// round.
 type cycleOutcome struct {
 	retryNow []string
+	// deferred maps a skipped dataset to the reason, for command results.
+	deferred map[string]string
 	failures map[string]string
 }
 
@@ -624,6 +673,7 @@ func (daemon *daemon) cycle(ctx context.Context, names []string) (cycleOutcome, 
 	pending := make(map[string]pendingDataset)
 	reported := options.Store.ReportedErrors()
 	failures := make(map[string]string)
+	deferred := make(map[string]string)
 	recovered := false
 
 	for _, name := range names {
@@ -632,6 +682,13 @@ func (daemon *daemon) cycle(ctx context.Context, names []string) (cycleOutcome, 
 			continue
 		}
 		dataset, err := collectDataset(ctx, instance, options.CollectTimeout)
+		if errors.Is(err, collector.ErrPackageManagerBusy) {
+			// Not an error: the previous dataset (and any reported error)
+			// stands until the package manager is done.
+			log.Printf("[collector] %s skipped: %v; keeping the previous dataset", name, err)
+			deferred[name] = err.Error()
+			continue
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return cycleOutcome{}, ctx.Err()
@@ -668,7 +725,9 @@ func (daemon *daemon) cycle(ctx context.Context, names []string) (cycleOutcome, 
 	nextReported := maps.Clone(reported)
 	errorsChanged := recovered
 	for _, name := range names {
-		delete(nextReported, name)
+		if _, skipped := deferred[name]; !skipped {
+			delete(nextReported, name)
+		}
 	}
 	for name, message := range failures {
 		nextReported[name] = message
@@ -680,7 +739,7 @@ func (daemon *daemon) cycle(ctx context.Context, names []string) (cycleOutcome, 
 		envelope.Errors = failures
 	}
 	if len(envelope.Datasets) == 0 && !errorsChanged {
-		return cycleOutcome{failures: failures}, nil
+		return cycleOutcome{deferred: deferred, failures: failures}, nil
 	}
 
 	seq, err := options.Store.NextSeq()
@@ -693,6 +752,7 @@ func (daemon *daemon) cycle(ctx context.Context, names []string) (cycleOutcome, 
 		return cycleOutcome{}, err
 	}
 	outcome, err := daemon.acknowledge(envelope, pending, response, nextReported)
+	outcome.deferred = deferred
 	outcome.failures = failures
 	return outcome, err
 }

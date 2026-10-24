@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -85,13 +86,36 @@ the systemd unit does not restart.`,
 			log.Printf("Server Chief agent %s starting (server %s, generation %d, endpoint %s, init %s, state %s)",
 				version, identity.ServerID, identity.Generation, identity.Endpoint, initsys.DetectSystem(), paths.State)
 
+			host := collector.NewHost(root)
+			var packages agent.PackageSystem
+			var recordRefresh func(time.Time) error
+			if host.PackageLocks != nil {
+				packages = collector.NewPackageSystem(host)
+				stamp, err := inventory.OpenRefreshStamp(paths.MetadataRefresh)
+				if err != nil {
+					log.Printf("[packages] %v; treating the last refresh as unknown", err)
+				}
+				host.MetadataRefreshedAt = stamp.At
+				recordRefresh = stamp.Record
+			}
+			var timings agent.PackageTimings
+			changePoll := time.Duration(0)
+			if os.Getenv(debugIntervalsEnv) == "1" {
+				timings = debugPackageTimings
+				changePoll = 5 * time.Second
+				if host.PackageLocks != nil {
+					host.PackageLocks.Patience = timings.LockPatience
+				}
+				log.Printf("[agent] %s=1: development-only short package intervals %+v", debugIntervalsEnv, timings)
+			}
+
 			ctx := command.Context()
 			reload := make(chan agent.Config)
 			stopReload := watchReload(ctx, *configPath, logWriter, reload)
 			defer stopReload()
 
 			err = agent.Run(ctx, agent.RunOptions{
-				Registry:     collector.Default(collector.NewHost(root)),
+				Registry:     collector.Default(host),
 				Store:        store,
 				Payloads:     inventory.NewPayloadStore(paths.Payloads),
 				Commands:     commands,
@@ -102,9 +126,13 @@ the systemd unit does not restart.`,
 				SaveServerConfig: func(serverConfig agent.ServerConfig) error {
 					return agent.SaveServerConfig(paths.ServerConfig, serverConfig)
 				},
-				Realtime: agent.PusherConnector(version, identity.Credential, tlsConfig),
-				Version:  version,
-				Reload:   reload,
+				Realtime:       agent.PusherConnector(version, identity.Credential, tlsConfig),
+				Version:        version,
+				Reload:         reload,
+				Packages:       packages,
+				PackageTimings: timings,
+				RecordRefresh:  recordRefresh,
+				ChangePoll:     changePoll,
 				Ready: func() {
 					_ = systemdnotify.NotifyReady("collecting inventory")
 				},
@@ -121,6 +149,21 @@ the systemd unit does not restart.`,
 	command.Flags().StringVar(&root, "root", "/", "Read files from this directory instead of /")
 	_ = command.Flags().MarkHidden("root")
 	return command
+}
+
+// debugIntervalsEnv set to 1 shortens the package metadata refresh and
+// package activity timings so they can be watched in a throwaway
+// container. Development only; it is not a supported setting.
+const debugIntervalsEnv = "SERVERCHIEF_DEBUG_INTERVALS"
+
+var debugPackageTimings = agent.PackageTimings{
+	Poll:              2 * time.Second,
+	Idle:              10 * time.Second,
+	LockPatience:      2 * time.Minute,
+	LockRetry:         20 * time.Second,
+	RefreshTimeout:    10 * time.Minute,
+	RefreshStartDelay: 5 * time.Second,
+	RefreshInterval:   time.Minute,
 }
 
 // watchReload turns SIGHUP into configuration reloads. An invalid file is

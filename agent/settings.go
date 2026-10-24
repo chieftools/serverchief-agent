@@ -89,3 +89,25 @@ func (settings settings) Heartbeat() time.Duration {
 func (settings settings) Enabled(name string) bool {
 	return slices.Contains(settings.server.Datasets, name) && settings.local.Enabled(name)
 }
+
+// MetadataRefresh returns whether the agent refreshes the package metadata
+// cache itself, and how often: local overrides first, then the backend's
+// package_metadata_refresh, which is enabled every 6 hours when absent.
+func (settings settings) MetadataRefresh() (bool, time.Duration) {
+	enabled, interval := true, DefaultRefreshInterval
+	if server := settings.server.PackageMetadataRefresh; server != nil {
+		enabled = server.Enabled
+		if server.Interval > 0 {
+			interval = max(time.Duration(server.Interval)*time.Second, MinimumRefreshInterval)
+		}
+	}
+	if local := settings.local.PackageMetadataRefresh; local != nil {
+		if local.Enabled != nil {
+			enabled = *local.Enabled
+		}
+		if local.Interval != 0 {
+			interval = time.Duration(local.Interval)
+		}
+	}
+	return enabled, interval
+}

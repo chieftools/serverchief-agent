@@ -29,9 +29,9 @@ type UpdatesInfo struct {
 	RebootRequired *bool `json:"reboot_required"`
 	// CacheUpdatedAt is when the package metadata the result is based on
 	// was last refreshed (UTC, whole seconds); null when there is no cache
-	// or it cannot be told. The agent never refreshes the cache itself. It
-	// is a timestamp rather than an age, so the dataset's hash only changes
-	// when the cache does.
+	// or it cannot be told. The daemon's metadata refresh (PackageSystem)
+	// moves it; collecting never does. It is a timestamp rather than an
+	// age, so the dataset's hash only changes when the cache does.
 	CacheUpdatedAt *time.Time `json:"cache_updated_at"`
 }
 
@@ -55,7 +55,10 @@ func (info *UpdatesInfo) Normalize() {
 }
 
 // Updates collects the updates dataset from the package manager's existing
-// metadata cache. It never runs apt-get update or makecache.
+// metadata cache. It never runs apt-get update or makecache (that is the
+// daemon's metadata refresh), and it never waits for a package manager:
+// while one holds its lock, Collect returns a BusyError so the previous
+// dataset is kept.
 type Updates struct {
 	host *Host
 }
@@ -64,11 +67,12 @@ func NewUpdates(host *Host) *Updates { return &Updates{host: host} }
 
 func (*Updates) Name() string { return "updates" }
 
-// ChangeToken implements ChangeDetector: installing or upgrading packages,
-// and refreshing the metadata cache, change what is pending.
+// ChangeToken implements ChangeDetector: a metadata refresh by someone
+// else (apt's daily timer, an administrator) changes what is pending.
+// Package database changes are the daemon's package activity trigger,
+// which waits until the package manager is done.
 func (collector *Updates) ChangeToken() string {
 	host := collector.host
-	token := host.packageDatabaseToken()
 	var cache *time.Time
 	switch {
 	case host.exists(dpkgStatusPath):
@@ -78,25 +82,27 @@ func (collector *Updates) ChangeToken() string {
 	case host.isDir("/var/cache/yum"):
 		cache = host.rpmCacheUpdatedAt(ManagerYum)
 	}
-	if cache != nil {
-		token += "|cache@" + cache.Format(time.RFC3339)
+	if cache == nil {
+		return "cache@none"
 	}
-	return token
+	return "cache@" + cache.Format(time.RFC3339)
 }
 
 func (collector *Updates) Collect(ctx context.Context) (any, error) {
 	host := collector.host
+	manager := host.updateManager()
+	if manager == "" {
+		return nil, errors.New("no supported package manager (apt, dnf or yum) found")
+	}
+	if lock, blocking := host.packageLockBlocking(); blocking {
+		return nil, &BusyError{Lock: lock.String()}
+	}
 	var info *UpdatesInfo
 	var err error
-	switch {
-	case host.exists(dpkgStatusPath) && host.findCommand("apt-get") != "":
+	if manager == ManagerApt {
 		info, err = host.aptUpdates(ctx)
-	case host.findCommand("dnf") != "":
-		info, err = host.rpmUpdates(ctx, ManagerDnf)
-	case host.findCommand("yum") != "":
-		info, err = host.rpmUpdates(ctx, ManagerYum)
-	default:
-		return nil, errors.New("no supported package manager (apt, dnf or yum) found")
+	} else {
+		info, err = host.rpmUpdates(ctx, manager)
 	}
 	if err != nil {
 		return nil, err
@@ -179,8 +185,8 @@ var aptStamps = []string{
 }
 
 // aptCacheUpdatedAt is the newest of the success stamps, the lists
-// directory and its Release/InRelease files, or nil without package
-// indexes.
+// directory and its Release/InRelease files and the agent's own last
+// successful refresh, or nil without package indexes.
 //
 // Measured on Ubuntu 14.04, 16.04 and 24.04: apt sets a downloaded file's
 // mtime to the archive's Last-Modified, so Release files only give a lower
@@ -215,13 +221,46 @@ func (host *Host) aptCacheUpdatedAt() *time.Time {
 	if stamp := host.newestModTime(append([]string{lists}, aptStamps...)...); stamp.After(newest) {
 		newest = stamp
 	}
-	return timestamp(newest)
+	return timestamp(host.withOwnRefresh(newest))
+}
+
+// withOwnRefresh returns the newer of a cache mtime and the agent's own
+// last successful metadata refresh. An update that found nothing new
+// upstream leaves the cache files alone, but the metadata was still
+// checked then. Only call it when a cache exists.
+func (host *Host) withOwnRefresh(newest time.Time) time.Time {
+	if host.MetadataRefreshedAt == nil {
+		return newest
+	}
+	if refreshed := host.MetadataRefreshedAt(); refreshed.After(newest) {
+		return refreshed
+	}
+	return newest
+}
+
+// rpmQuery runs a cache-only yum/dnf query that gives up instead of
+// waiting when another yum/dnf holds its lock (both wait forever by
+// default), with its own timeout.
+func (host *Host) rpmQuery(ctx context.Context, manager string, args ...string) (CommandResult, error) {
+	queryContext, cancel := context.WithTimeout(ctx, rpmCommandTimeout)
+	defer cancel()
+	result, err := host.run(queryContext, manager, append([]string{"-C", "-q", exitOnLock}, args...)...)
+	if err != nil {
+		return result, err
+	}
+	if message, busy := rpmBusy(result); busy && result.ExitCode != 0 && result.ExitCode != 100 {
+		return result, &BusyError{Lock: message}
+	}
+	return result, nil
 }
 
 // rpmUpdates lists pending updates from yum or dnf with -C (cache only), so
 // the metadata is never refreshed.
 func (host *Host) rpmUpdates(ctx context.Context, manager string) (*UpdatesInfo, error) {
-	result, err := host.run(ctx, manager, "-C", "-q", "check-update")
+	result, err := host.rpmQuery(ctx, manager, "check-update")
+	if errors.Is(err, ErrPackageManagerBusy) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%s check-update: %w", manager, err)
 	}
@@ -229,12 +268,8 @@ func (host *Host) rpmUpdates(ctx context.Context, manager string) (*UpdatesInfo,
 	case 0, 100: // 100: updates are available
 	default:
 		// yum explains at length and ends with the cause.
-		message := lastLine(result.Stderr)
-		if message == "" {
-			message = lastLine(result.Stdout)
-		}
-		return nil, fmt.Errorf("%s -C check-update exited with status %d: %s (the agent never refreshes the metadata cache; run `%s makecache` or enable its timer)",
-			manager, result.ExitCode, message, manager)
+		return nil, fmt.Errorf("%s -C check-update exited with status %d: %s (without a metadata cache, the agent's metadata refresh creates one when package_metadata_refresh is enabled)",
+			manager, result.ExitCode, rpmFailure(result))
 	}
 
 	installed, err := host.queryRPM(ctx)
@@ -245,7 +280,10 @@ func (host *Host) rpmUpdates(ctx context.Context, manager string) (*UpdatesInfo,
 	for _, item := range collapsePackages(installed, compareRPMVersions) {
 		current[item.Name+"."+item.Arch] = item.Version
 	}
-	security := host.rpmSecurityUpdates(ctx, manager)
+	security, err := host.rpmSecurityUpdates(ctx, manager)
+	if err != nil {
+		return nil, err
+	}
 
 	info := &UpdatesInfo{Manager: manager, Items: []Update{}}
 	for _, available := range parseCheckUpdate(result.Stdout) {
@@ -289,17 +327,22 @@ func parseCheckUpdate(data []byte) []Update {
 }
 
 // rpmSecurityUpdates returns name.arch of updates that fix security
-// advisories. Repositories without updateinfo (CentOS 7) yield none.
-func (host *Host) rpmSecurityUpdates(ctx context.Context, manager string) map[string]bool {
-	args := []string{"-C", "-q", "updateinfo", "list", "security"}
+// advisories. Repositories without updateinfo (CentOS 7) yield none. A
+// held lock is an error: reporting every update as non-security would
+// change the dataset.
+func (host *Host) rpmSecurityUpdates(ctx context.Context, manager string) (map[string]bool, error) {
+	args := []string{"updateinfo", "list", "security"}
 	if manager == ManagerDnf {
-		args = []string{"-C", "-q", "updateinfo", "list", "--security"}
+		args = []string{"updateinfo", "list", "--security"}
 	}
-	result, err := host.run(ctx, manager, args...)
+	result, err := host.rpmQuery(ctx, manager, args...)
+	if errors.Is(err, ErrPackageManagerBusy) {
+		return nil, err
+	}
 	if err != nil || result.ExitCode != 0 {
-		return map[string]bool{}
+		return map[string]bool{}, nil
 	}
-	return parseUpdateinfo(result.Stdout)
+	return parseUpdateinfo(result.Stdout), nil
 }
 
 // parseUpdateinfo parses "ADVISORY TYPE NEVRA" lines such as
@@ -362,7 +405,8 @@ func (host *Host) needsRestarting(ctx context.Context) *bool {
 }
 
 // rpmCacheUpdatedAt is the newest metadata timestamp in the manager's
-// cache directory: repomd.xml, yum's per-repository cachecookie (touched on
+// cache directory, or the agent's own last successful refresh when that
+// is newer: repomd.xml, yum's per-repository cachecookie (touched on
 // every metadata check) and dnf's primary metadata, whose mtime libdnf
 // resets on every check that finds the metadata current (it is what dnf
 // shows as "Last metadata expiration check"). Directory mtimes are not
@@ -396,7 +440,10 @@ func (host *Host) rpmCacheUpdatedAt(manager string) *time.Time {
 			return nil
 		})
 	}
-	return timestamp(newest)
+	if newest.IsZero() {
+		return nil // no cache, whatever the agent recorded
+	}
+	return timestamp(host.withOwnRefresh(newest))
 }
 
 func (host *Host) newestModTime(names ...string) time.Time {

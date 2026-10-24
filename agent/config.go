@@ -38,6 +38,14 @@ var DefaultIntervals = map[string]time.Duration{
 // DefaultHeartbeatInterval is how often the agent checks in.
 const DefaultHeartbeatInterval = 5 * time.Minute
 
+const (
+	// DefaultRefreshInterval is the package metadata refresh cadence when
+	// the backend does not configure one.
+	DefaultRefreshInterval = 6 * time.Hour
+	// MinimumRefreshInterval keeps a configuration from hammering mirrors.
+	MinimumRefreshInterval = time.Hour
+)
+
 // fallbackInterval applies to datasets without a configured interval.
 const fallbackInterval = time.Hour
 
@@ -70,6 +78,15 @@ type Config struct {
 	HeartbeatInterval Duration `json:"heartbeat_interval,omitempty"`
 	// Datasets further restricts the datasets the backend enabled.
 	Datasets []string `json:"datasets,omitempty"`
+	// PackageMetadataRefresh overrides the backend's
+	// package_metadata_refresh; either field can be left out.
+	PackageMetadataRefresh *LocalMetadataRefresh `json:"package_metadata_refresh,omitempty"`
+}
+
+// LocalMetadataRefresh is the local package_metadata_refresh override.
+type LocalMetadataRefresh struct {
+	Enabled  *bool    `json:"enabled,omitempty"`
+	Interval Duration `json:"interval,omitempty"`
 }
 
 // DefaultConfig returns the built-in configuration: no overrides.
@@ -108,6 +125,9 @@ func (config Config) Validate() error {
 	}
 	if config.HeartbeatInterval != 0 && time.Duration(config.HeartbeatInterval) < MinimumInterval {
 		return fmt.Errorf("heartbeat_interval must be at least %s", MinimumInterval)
+	}
+	if refresh := config.PackageMetadataRefresh; refresh != nil && refresh.Interval != 0 && time.Duration(refresh.Interval) < MinimumRefreshInterval {
+		return fmt.Errorf("package_metadata_refresh.interval must be at least %s", MinimumRefreshInterval)
 	}
 	return nil
 }

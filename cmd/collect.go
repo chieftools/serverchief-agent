@@ -33,7 +33,15 @@ Available datasets: ` + strings.Join(collector.Default(collector.NewHost("/")).N
   serverchief collect --root /mnt/image --dataset system`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			registry := collector.Default(collector.NewHost(root))
+			host := collector.NewHost(root)
+			if root == "" || root == "/" {
+				// Report cache_updated_at as the daemon does, including its
+				// own last metadata refresh (read only).
+				if stamp, err := inventory.OpenRefreshStamp(agent.DefaultPaths().MetadataRefresh); err == nil {
+					host.MetadataRefreshedAt = stamp.At
+				}
+			}
+			registry := collector.Default(host)
 			selected, err := registry.Select(datasets)
 			if err != nil {
 				return err
