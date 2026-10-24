@@ -16,7 +16,7 @@
       }
     },
     "vhosts": {
-      "hash": "854a28d37cc9e66bd6196a846bdb0803b80332c2d18838d89a2a22fe9169ac06",
+      "hash": "052ee1cb68884354740793b98e1cdf3b1ba3dd63cdc37af65ba7956b02fb2525",
       "mode": "full",
       "payload": {
         "items": [
@@ -25,6 +25,7 @@
               "www.shop.example.test"
             ],
             "certificate": {
+              "fingerprint": "5b0e7c9a1d3f5b7e9c2a4d6f8b0c1e3a5d7f9b2c4e6a8d0f1b3c5e7a9d2f4b6c",
               "issuer": "shop.example.test",
               "names": [
                 "shop.example.test",

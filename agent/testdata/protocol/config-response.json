@@ -1,5 +1,6 @@
 {
   "datasets": [
+    "certificates",
     "cloud",
     "hardware",
     "network",
@@ -12,6 +13,7 @@
   "etag": "\"c1-5f3a9e\"",
   "intervals": {
     "datasets": {
+      "certificates": 3600,
       "cloud": 86400,
       "hardware": 3600,
       "network": 300,
@@ -22,6 +24,10 @@
       "vhosts": 900
     },
     "heartbeat": 300
+  },
+  "package_metadata_refresh": {
+    "enabled": true,
+    "interval": 21600
   },
   "realtime": {
     "auth_endpoint": "https://server.chief.test/agent/v1/broadcasting/auth",

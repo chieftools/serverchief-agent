@@ -1,6 +1,7 @@
 {
   "config_etag": "\"c1-5f3a9e\"",
   "datasets": [
+    "certificates",
     "cloud",
     "hardware",
     "network",
@@ -14,6 +15,7 @@
   "generation": 1,
   "intervals": {
     "datasets": {
+      "certificates": 3600,
       "cloud": 86400,
       "hardware": 3600,
       "network": 300,
@@ -24,6 +26,10 @@
       "vhosts": 900
     },
     "heartbeat": 300
+  },
+  "package_metadata_refresh": {
+    "enabled": true,
+    "interval": 21600
   },
   "protocol_revision": "1.0.0",
   "realtime": {
