@@ -19,9 +19,10 @@ const (
 	// maxServiceConfigFile bounds one mail or panel configuration file.
 	maxServiceConfigFile = 1 << 20
 	// serviceIncludeDepth and serviceIncludeFiles bound the includes
-	// followed in a Dovecot or Exim configuration.
+	// followed in a Dovecot or Exim configuration. Plesk writes one Dovecot
+	// SNI file per mail domain, so the file bound matches the nginx one.
 	serviceIncludeDepth = 4
-	serviceIncludeFiles = 64
+	serviceIncludeFiles = 5000
 )
 
 // eximConfigs are the main Exim configuration files, in the order tried:

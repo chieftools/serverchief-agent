@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"io/fs"
 	"math/big"
@@ -882,6 +883,22 @@ func TestDovecotCertificates(t *testing.T) {
 	}
 	if !slices.ContainsFunc(run.warnings, func(warning string) bool { return strings.Contains(warning, "include levels") }) {
 		t.Errorf("no warning for the include loop: %v", run.warnings)
+	}
+}
+
+func TestDovecotFollowsPerDomainSNIFiles(t *testing.T) {
+	// Plesk writes one Dovecot SNI file per mail domain, often hundreds.
+	fsys := fstest.MapFS{"etc/dovecot/dovecot.conf": mapFile([]byte("!include conf.d/*.conf\n"))}
+	for index := range 300 {
+		name := fmt.Sprintf("mail%03d.example.test", index)
+		fsys["etc/dovecot/conf.d/sni-"+name+".conf"] = mapFile([]byte("local_name " + name + " {\n  ssl_cert = </etc/ssl/" + name + ".pem\n}\n"))
+	}
+	run := newCertificateRun(&Host{FS: fsys}, nil)
+	if got := len(dovecotCertificates(run)); got != 300 {
+		t.Errorf("found %d certificates, want 300 (warnings: %v)", got, run.warnings)
+	}
+	if len(run.warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", run.warnings)
 	}
 }
 
