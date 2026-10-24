@@ -101,7 +101,7 @@ Without `identity.json` the daemon exits with "not enrolled, run `serverchief se
 - heartbeats right away and then every `intervals.heartbeat` seconds (±10%), reporting the hashes and seq the backend acknowledged. Datasets listed in `resync` are sent in full at once, and a changed `config_etag` triggers `GET /config` with `If-None-Match`.
 - collects each dataset the backend enabled on its backend-provided interval and batches the due, changed datasets into one envelope with a persisted, increasing `seq`. `packages` and `vhosts` are sent as deltas against the last acknowledged payload once the backend has one. Collector failures go in the envelope's `errors` map whenever they change. Hashes advance only for datasets listed in `accepted` with the hash that was sent. Datasets the backend `ignored` are not sent again until its configuration changes.
 - subscribes to `private-agent.server_<id>.generation_<n>` when the configuration has a `realtime` block, authorising the channel with its credential. `config.updated` fetches the configuration and `commands.available` fetches the commands. Without `realtime` it polls only.
-- runs backend commands. When a heartbeat answers `commands_available: true` or `commands.available` arrives, it calls `GET /commands`, acknowledges each new command and then executes it: `refresh_inventory` collects the listed (or all enabled) datasets and pushes what changed, `resync` sends them in full, `refresh_config` fetches `GET /config`. Unknown kinds are acknowledged and reported `failed` with `unsupported command kind "<kind>"`. The result (`succeeded`, or `failed` with the error) is posted once the push or config fetch finishes. Acknowledgements and results are retried with the error table's backoff, and a journal of recent commands makes sure a restart neither executes a command twice nor loses its result: a command that was executing when the agent stopped is reported `failed`.
+- runs backend commands. When a heartbeat answers `commands_available: true` or `commands.available` arrives, it calls `GET /commands`, acknowledges each new command and then executes it: `refresh_inventory` collects the listed (or all enabled) datasets and pushes what changed, `resync` sends them in full, `refresh_config` fetches `GET /config`, `update_agent` hands an agent update to the update helper (see *Agent updates*). Unknown kinds are acknowledged and reported `failed` with `unsupported command kind "<kind>"`. The result (`succeeded`, or `failed` with the error) is posted once the push or config fetch finishes. Acknowledgements and results are retried with the error table's backoff, and a journal of recent commands makes sure a restart neither executes a command twice nor loses its result: a command that was executing when the agent stopped is reported `failed`.
 - follows the protocol's error table: `401 revoked`/`unauthenticated` stops every loop and exits with status 2, which the systemd unit does not restart (`RestartPreventExitStatus=2`). `426` pauses inventory and heartbeats hourly. `429` and `503` honour `Retry-After`. `400`, `404`, `413` and `422` are logged and not retried unchanged. Other `5xx` and network errors back off exponentially (2 s doubling to 5 min, with jitter).
 
 `SIGINT` and `SIGTERM` stop the daemon gracefully. `SIGHUP` (`systemctl reload serverchief`) reloads the local configuration, reopens the log file and collects every dataset again.
@@ -117,7 +117,36 @@ Every key in `/etc/serverchief/config.json` is optional. These operator override
 }
 ```
 
-State lives in `/var/lib/serverchief`: `state.json` (seq, acknowledged seq and hashes, last reported errors), `server-config.json` (the backend configuration with its ETag), `payloads/` (delta bases), `metadata-refresh.json` (the last successful package metadata refresh) and `commands.json` (recent commands with their state and result, kept 48 hours after their result was reported). Every file is replaced atomically (temporary file, fsync, rename).
+State lives in `/var/lib/serverchief`: `state.json` (seq, acknowledged seq and hashes, last reported errors), `server-config.json` (the backend configuration with its ETag), `payloads/` (delta bases), `metadata-refresh.json` (the last successful package metadata refresh) `commands.json` (recent commands with their state and result, kept 48 hours after their result was reported) and, while an agent update runs, `update-request.json`, `update-state.json`, `update-ready.json` and `update-result.json` (see *Agent updates*). Every file is mode 0600 and replaced atomically (temporary file, fsync, rename).
+
+### Agent updates
+
+The backend sends `update_agent {"version": "X.Y.Z"}` only to agents whose heartbeat reports `capabilities.agent_update.available: true`. Every heartbeat carries it; the probe is cached for 10 minutes (1 minute while unavailable, since the new daemon first starts inside the package's `postinst`). It is available only when all of these hold, and otherwise `reason` says which failed:
+
+- a stable release build (`dev` and pre-release builds never are),
+- dpkg or rpm reports the `serverchief` package, fully installed, at the running version (not "installed from a tarball"),
+- the Server Chief repository is configured: `/etc/apt/sources.list.d/serverchief.list` or `.sources`, or `/etc/yum.repos.d/serverchief.repo`; apt must be 1.1 or later (`--allow-downgrades`, deb822 files),
+- the helper can be launched and the package can restart this daemon: under systemd, `systemd-run` exists and the daemon runs as `serverchief.service` (from `/proc/self/cgroup`); under SysV or Upstart, the init script exists and its pid file holds the daemon's PID. A container without an init system is not available.
+
+The command carries nothing but the version, which must match `^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`; other fields are rejected. The daemon checks the capability again, journals the command as `handed_off`, writes `update-request.json` (command ID, running and target version) and launches the helper so that it survives the package's restart of the daemon:
+
+- systemd: `systemd-run --unit=serverchief-update --collect --no-block --description=… /usr/bin/serverchief internal-update`, a transient unit outside the daemon's unit and sandbox (systemd < 236 gets neither `--collect` nor `--no-block`, and a failed unit of the same name is reset first),
+- SysV: a double fork (`internal-update --detach` in a new session starts the helper with `Setsid` and exits), with its output in `/var/log/serverchief/update.log`.
+
+The helper (`serverchief internal-update`, hidden, root only) holds an fcntl lock on `update.lock` for its whole run, so a second launch exits, and records each phase in `update-state.json`:
+
+1. **Wait for the package manager:** the `pkglock` locks are checked every 30 s for up to an hour (counted from the first attempt, across restarts), then `package_manager_busy`.
+2. **Preflight:** refresh the Server Chief repository only, then require both the target and the installed version in it: `target_unavailable`, `rollback_unavailable`.
+3. **Install** only `serverchief`, only from that repository (no shell, fixed argv):
+   - `apt-get install -y --only-upgrade --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dir::Etc::sourcelist=<serverchief.list|.sources> -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 serverchief=<version>` (apt reads a `.sources` file named by `Dir::Etc::sourcelist` as deb822; the refresh is `apt-get update -qq` and the query `apt-cache madison serverchief` with the same restriction),
+   - `dnf|yum --disablerepo=* --enablerepo=serverchief --setopt=exit_on_lock=True install -y serverchief-<version>` (`downgrade` when the version is older; refresh `dnf --refresh makecache` or `yum clean expire-cache`, query `--showduplicates list available serverchief`).
+4. **Readiness:** the package's `postinst` restarts the daemon. A daemon that starts while a request is pending writes `update-ready.json` (command ID, version, PID) after its first successful heartbeat; the helper waits up to 2 minutes for a marker of the target version from a live process.
+5. **Rollback:** otherwise the previous version is installed the same way and must report ready too.
+6. **Result:** `update-result.json` with `updated`, `install_failed` (the package manager failed and the previous version is intact), `readiness_failed_rolled_back`, `rollback_failed`, the preflight codes, `package_manager_busy` or `unsupported_install`; then the request, state and marker are removed.
+
+A crashed or interrupted helper resumes from `update-state.json` when it runs again: the daemon relaunches it once after a start when a request is pending and no helper holds the lock, and a helper that stopped five times gives up with what is installed. The daemon polls for the result every 5 s, reports it with `data: {code, previous_version, target_version, installed_version}` and deletes the file once the backend accepted it. A restarted daemon never runs a handed-off command again (it re-acknowledges it if the backend lists it again); one that has neither a request nor a result is reported `install_failed`. A second `update_agent` while one is in progress gets `package_manager_busy`, and the daemon's own metadata refresh waits until the update is done.
+
+The daemon's unit hardening does not apply to the helper, which runs in its own transient unit. Within the unit, `ProtectSystem=full` and `MemoryDenyWriteExecute=yes` do not affect the metadata refresh: `apt-get update` and `dnf makecache` were verified as children of the hardened `serverchief.service` on Debian 12 and AlmaLinux 9 (full downloads into `/var/lib/apt/lists` and `/var/cache/dnf`, apt's `_apt` privilege drop under `NoNewPrivileges`), so the unit is unchanged.
 
 ### End-to-end test against a local backend
 
@@ -154,7 +183,7 @@ The container has no init system, so setup prints the manual-start hint and `ser
 
 ### Package metadata refresh and package activity
 
-The agent never installs, upgrades or removes packages. `TestPackageCommandAllowList` pins every package-manager command it can run, and `TestNoMutatingPackageVerbsInSource` fails on any string literal such as `install` or `remove` in the agent's sources.
+Apart from installing its own `serverchief` package through the update helper, the agent never installs, upgrades or removes packages. `TestPackageCommandAllowList` and `TestUpdateCommandAllowList` pin every package-manager command it can run, and `TestNoMutatingPackageVerbsInSource` fails on any string literal such as `install` or `remove` in the agent's sources outside `updater/commands.go`, which may only use `install`, `downgrade` and `-y`.
 
 - **Metadata refresh.** While `updates` is enabled and `package_metadata_refresh.enabled` (backend default: on, every 21600 s), the daemon refreshes the metadata cache every interval ±10%, starting up to 5 minutes after start:
   - `nice -n 19 ionice -c3 -t apt-get update -qq`
@@ -189,9 +218,10 @@ Payloads hold only values that are stable while the server is unchanged: capacit
 
 ```
 main.go          signal handling, embedded fallback CA roots
-cmd/             cobra CLI: version, collect, run, setup
+cmd/             cobra CLI: version, collect, run, setup, internal-update (hidden)
 collector/       Collector interface, registry and the built-in collectors, plus the package system for the daemon's metadata refresh
 pkglock/         read-only package-manager lock inspection (F_GETLK, PID files)
+updater/         agent self-updates: capability, request/state/result files, the internal-update helper
 inventory/       canonical JSON, SHA-256 hashes, envelope, keyed-list deltas, state store
 agent/           protocol client, enrollment, daemon loop, settings, realtime glue
 initsys/         init system detection plus systemd and SysV service managers
@@ -229,6 +259,8 @@ docker run --rm -v "$PWD/serverchief-linux-arm64:/usr/bin/serverchief:ro" ubuntu
 ```
 
 `bin/build-deb.sh` and `bin/build-rpm.sh` also accept `SKIP_BUILD=1` to package a binary built earlier.
+
+For end-to-end tests of agent updates in throwaway containers, `TEST_BUILD_TAGS` adds test-only hooks to `bin/build.sh`: `serverchief_e2e_never_ready` (the daemon never writes its readiness marker, so an update to it rolls back) and `serverchief_e2e_short_lock_wait` (the helper gives up on a held lock after 30 s). Never set it for a release.
 
 ## License
 

@@ -26,7 +26,19 @@ GOTOOLCHAIN="go$(awk '/^go / { print $2 }' go.mod)"
 export GOTOOLCHAIN
 export CGO_ENABLED=0
 
-BUILD_FLAGS=(-mod=readonly -trimpath -buildvcs=false "-tags=netgo,osusergo")
+# TEST_BUILD_TAGS adds test-only hooks for end-to-end runs in throwaway
+# containers (see updater/testbuild_*.go), e.g.
+# TEST_BUILD_TAGS=serverchief_e2e_never_ready. Never set it for a release.
+TAGS="netgo,osusergo"
+if [ -n "${TEST_BUILD_TAGS:-}" ]; then
+    if [[ ! "${TEST_BUILD_TAGS}" =~ ^serverchief_e2e_[a-z_]+(,serverchief_e2e_[a-z_]+)*$ ]]; then
+        echo "TEST_BUILD_TAGS only takes serverchief_e2e_* tags." >&2
+        exit 1
+    fi
+    TAGS="${TAGS},${TEST_BUILD_TAGS}"
+    echo "Test build with ${TEST_BUILD_TAGS}: not for release." >&2
+fi
+BUILD_FLAGS=(-mod=readonly -trimpath -buildvcs=false "-tags=${TAGS}")
 LDFLAGS="-s -w -buildid= -X main.version=${VERSION}"
 
 build() {

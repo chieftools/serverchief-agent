@@ -40,6 +40,10 @@ const (
 	// commandAcknowledged: acknowledged and executing. A restart in this
 	// state reports failed instead of executing it a second time.
 	commandAcknowledged commandState = "acknowledged"
+	// commandHandedOff: an update_agent the detached helper carries out.
+	// A restart neither runs it again nor reports it interrupted; the
+	// helper's result file finishes it.
+	commandHandedOff commandState = "handed_off"
 	// commandFinished: executed; Result holds the outcome.
 	commandFinished commandState = "finished"
 )
@@ -245,6 +249,10 @@ func (daemon *daemon) recoverCommands(now time.Time) {
 		case commandAcknowledged:
 			log.Printf("[commands] %s %s was interrupted by a restart; reporting it failed", record.Kind, record.ID)
 			daemon.finishCommand(record.ID, CommandFailed, "the agent restarted before the command finished")
+		case commandHandedOff:
+			log.Printf("[commands] %s %s is with the update helper; waiting for its result", record.Kind, record.ID)
+			daemon.update.active = true
+			daemon.update.inProgress = true
 		case commandFinished:
 			if !record.Reported && record.Result != nil {
 				daemon.results.add(record.ID, now)
@@ -282,10 +290,11 @@ func (daemon *daemon) fetchCommands(ctx context.Context) error {
 	now := options.Now()
 	for _, command := range commands {
 		if record := daemon.commands.get(command.ID); record != nil {
-			// Known: in flight, or finished but still listed as
-			// unacknowledged (an ack the backend lost). Acknowledge it
-			// again and resend its result; never execute it twice.
-			if record.State == commandFinished {
+			// Known: in flight, with the update helper, or finished but
+			// still listed as unacknowledged (an ack the backend lost).
+			// Acknowledge it again and resend its result; never execute
+			// it twice.
+			if record.State == commandFinished || record.State == commandHandedOff {
 				daemon.acks.add(command.ID, now)
 			}
 			continue
@@ -403,6 +412,8 @@ func (daemon *daemon) execute(record commandRecord) {
 			return
 		}
 		daemon.waiters = append(daemon.waiters, waiter)
+	case CommandUpdateAgent:
+		daemon.startUpdate(record)
 	case CommandRefreshConfig:
 		log.Printf("[commands] %s %s: fetching the configuration", record.Kind, record.ID)
 		daemon.configPending = true
@@ -491,12 +502,17 @@ func (daemon *daemon) settle(done func(*commandWaiter) bool) {
 
 // finishCommand records a command's outcome and queues its result.
 func (daemon *daemon) finishCommand(id, status, detail string) {
+	daemon.finishCommandData(id, status, detail, nil)
+}
+
+// finishCommandData is finishCommand with kind-specific result data.
+func (daemon *daemon) finishCommandData(id, status, detail string, data json.RawMessage) {
 	now := daemon.options.Now()
 	record := daemon.commands.get(id)
 	if record == nil {
 		record = &commandRecord{ID: id}
 	}
-	result := CommandResult{Status: status, FinishedAt: now.UTC().Truncate(time.Second)}
+	result := CommandResult{Status: status, FinishedAt: now.UTC().Truncate(time.Second), Data: data}
 	if runes := []rune(detail); len(runes) > maximumDetailRunes {
 		detail = string(runes[:maximumDetailRunes-1]) + "…"
 	}
@@ -551,6 +567,13 @@ func (daemon *daemon) sendResults(ctx context.Context) error {
 		record.UpdatedAt = options.Now().UTC()
 		if err := daemon.commands.put(*record); err != nil {
 			log.Printf("[commands] %v", err)
+		}
+		if record.Kind == CommandUpdateAgent && options.Updates != nil {
+			// The journal holds the reported result now; the helper's
+			// copy goes.
+			if err := options.Updates.RemoveResult(id); err != nil {
+				log.Printf("[update] %v", err)
+			}
 		}
 	}
 	return nil

@@ -15,6 +15,7 @@ import (
 
 	"go.chief.tools/serverchief-agent/collector"
 	"go.chief.tools/serverchief-agent/inventory"
+	"go.chief.tools/serverchief-agent/updater"
 )
 
 const (
@@ -65,7 +66,12 @@ type RunOptions struct {
 	// RecordRefresh persists a successful metadata refresh (the state
 	// directory's metadata-refresh.json) before updates is collected.
 	RecordRefresh func(time.Time) error
-	Now           func() time.Time
+	// Updates hands update_agent to the detached helper and reports the
+	// capability. Nil reports updates unavailable.
+	Updates *updater.Controller
+	// UpdatePoll is how often the helper's result is looked for (5 s).
+	UpdatePoll time.Duration
+	Now        func() time.Time
 	// Jitter returns a random duration in [0, maximum].
 	Jitter func(maximum time.Duration) time.Duration
 }
@@ -113,6 +119,8 @@ type daemon struct {
 
 	// packages is the metadata refresh and package activity state.
 	packages packageWork
+	// update is the agent update hand-over and readiness state.
+	update updateWork
 }
 
 // Run heartbeats, collects datasets on their schedules and delivers changes
@@ -179,6 +187,7 @@ func newDaemon(options RunOptions) *daemon {
 	}
 	daemon.scheduleAll(now)
 	daemon.scheduleRefresh(now)
+	daemon.initUpdates(now)
 	daemon.recoverCommands(now)
 	return daemon
 }
@@ -266,6 +275,7 @@ func (daemon *daemon) tick(ctx context.Context) error {
 			}
 		}
 	}
+	daemon.pollUpdate(ctx, options.Now())
 	if !daemon.unsupported {
 		if err := daemon.sendResults(ctx); err != nil {
 			return err
@@ -290,6 +300,9 @@ func (daemon *daemon) wakeAt() time.Time {
 	}
 	if daemon.hasChangeDetectors() && daemon.changePollAt.Before(wakeAt) {
 		wakeAt = daemon.changePollAt
+	}
+	if daemon.options.Updates != nil && daemon.update.active && daemon.update.pollAt.Before(wakeAt) {
+		wakeAt = daemon.update.pollAt
 	}
 	if !daemon.unsupported {
 		if daemon.commandsPending && daemon.commandsAt.Before(wakeAt) {
@@ -398,6 +411,7 @@ func (daemon *daemon) heartbeat(ctx context.Context) error {
 		SentAt:       now.UTC().Truncate(time.Second),
 		Hashes:       options.Store.Hashes(),
 		Seq:          options.Store.AcknowledgedSeq(),
+		Capabilities: daemon.capabilities(ctx),
 	}
 	response, err := options.Client.Heartbeat(ctx, request)
 	if err != nil {
@@ -422,6 +436,7 @@ func (daemon *daemon) heartbeat(ctx context.Context) error {
 	}
 	daemon.heartbeatBackoff = initialBackoff
 	daemon.heartbeatAt = options.Now().Add(normalJitter(daemon.settings.Heartbeat(), JitterFraction, options.Jitter))
+	daemon.markReady()
 
 	if len(response.Resync) > 0 {
 		log.Printf("[heartbeat] backend requested a full resend of %s", strings.Join(response.Resync, ", "))

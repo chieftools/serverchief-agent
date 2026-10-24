@@ -50,6 +50,9 @@ type Paths struct {
 	// MetadataRefresh records the agent's last successful package metadata
 	// refresh, which counts towards cache_updated_at.
 	MetadataRefresh string
+	// Updates holds the agent update's request, state, readiness and
+	// result files (updater.Store).
+	Updates string
 	// Log is the file log used on hosts without journald.
 	Log string
 }
@@ -66,6 +69,7 @@ func DefaultPaths() Paths {
 		Commands:     "/var/lib/serverchief/commands.json",
 
 		MetadataRefresh: "/var/lib/serverchief/metadata-refresh.json",
+		Updates:         "/var/lib/serverchief",
 		Log:             "/var/log/serverchief/agent.log",
 	}
 }
@@ -78,6 +82,7 @@ func (paths Paths) WithStateDirectory(directory string) Paths {
 	paths.Payloads = filepath.Join(directory, "payloads")
 	paths.Commands = filepath.Join(directory, "commands.json")
 	paths.MetadataRefresh = filepath.Join(directory, "metadata-refresh.json")
+	paths.Updates = directory
 	return paths
 }
 
@@ -199,6 +204,20 @@ type HeartbeatRequest struct {
 	SentAt       time.Time         `json:"sent_at"`
 	Hashes       map[string]string `json:"hashes"`
 	Seq          uint64            `json:"seq"`
+	// Capabilities is optional; the backend treats it as absent when nil.
+	Capabilities *Capabilities `json:"capabilities,omitempty"`
+}
+
+// Capabilities are what this agent can do beyond the inventory.
+type Capabilities struct {
+	AgentUpdate AgentUpdateCapability `json:"agent_update"`
+}
+
+// AgentUpdateCapability tells the backend whether it may send
+// update_agent; Reason explains why not.
+type AgentUpdateCapability struct {
+	Available bool    `json:"available"`
+	Reason    *string `json:"reason"`
 }
 
 // HeartbeatResponse is the answer to POST /heartbeat.
@@ -218,6 +237,9 @@ const (
 	CommandResync = "resync"
 	// CommandRefreshConfig fetches GET /config now.
 	CommandRefreshConfig = "refresh_config"
+	// CommandUpdateAgent installs {"version": "X.Y.Z"} of the agent
+	// package through the detached update helper.
+	CommandUpdateAgent = "update_agent"
 )
 
 // Command result statuses.
@@ -250,6 +272,18 @@ type CommandResult struct {
 	Status     string    `json:"status"`
 	Detail     *string   `json:"detail"`
 	FinishedAt time.Time `json:"finished_at"`
+	// Data is kind-specific and optional (AgentUpdateData for
+	// update_agent); at most 4 KiB.
+	Data json.RawMessage `json:"data,omitempty"`
+}
+
+// AgentUpdateData is the data of an update_agent result
+// (fixtures/update-agent-result-request.json).
+type AgentUpdateData struct {
+	Code             string `json:"code"`
+	PreviousVersion  string `json:"previous_version"`
+	TargetVersion    string `json:"target_version"`
+	InstalledVersion string `json:"installed_version"`
 }
 
 // InventoryResponse is the answer to POST /inventory

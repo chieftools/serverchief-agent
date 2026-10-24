@@ -6,9 +6,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"go.chief.tools/serverchief-agent/pkglock"
+	"go.chief.tools/serverchief-agent/updater"
 )
 
 // fakeTracker returns a lock tracker whose only lock is held while *held.
@@ -294,7 +297,7 @@ func TestPackageSystemCacheAndLocks(t *testing.T) {
 }
 
 // packageManagerTools are the programs whose argv must be allow-listed.
-var packageManagerTools = []string{"apt", "apt-get", "aptitude", "dpkg", "yum", "dnf", "dnf5", "rpm", "needs-restarting", "nice", "ionice", "microdnf", "zypper"}
+var packageManagerTools = []string{"apt", "apt-get", "apt-cache", "aptitude", "dpkg", "dpkg-query", "yum", "dnf", "dnf5", "rpm", "needs-restarting", "nice", "ionice", "microdnf", "zypper"}
 
 // allowedCollectionCommands are the package-manager queries collectors
 // run, with program paths reduced to their base name: a simulation and
@@ -443,15 +446,173 @@ var forbiddenPackageVerbs = map[string]bool{
 	"--configure": true, "--unpack": true, "-y": true, "--assumeyes": true,
 }
 
+// allowedUpdateCommands are the agent update's package-manager argvs
+// (updater.Commands and the queries around them), the only ones that
+// install anything. <sources> is the Server Chief apt list or deb822
+// file, <rpm> is dnf or yum, and <v> is a stable X.Y.Z version. Each one
+// names the serverchief package and restricts the package manager to the
+// Server Chief repository.
+var allowedUpdateCommands = []string{
+	"apt-get update -qq -o Dir::Etc::sourcelist=<sources> -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0",
+	"apt-cache -o Dir::Etc::sourcelist=<sources> -o Dir::Etc::sourceparts=- madison serverchief",
+	"apt-get install -y --only-upgrade --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dir::Etc::sourcelist=<sources> -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 serverchief=<v>",
+	"dpkg-query -W -f=${db:Status-Abbrev}|${Version}\n serverchief",
+	"dpkg-query -W -f=${Version} apt",
+	"rpm -q --qf %{VERSION}\n serverchief",
+	"dnf -q --disablerepo=* --enablerepo=serverchief --setopt=exit_on_lock=True --refresh makecache",
+	"yum -q --disablerepo=* --enablerepo=serverchief --setopt=exit_on_lock=True clean expire-cache",
+	"<rpm> -q --disablerepo=* --enablerepo=serverchief --setopt=exit_on_lock=True --showduplicates list available serverchief",
+	"<rpm> --disablerepo=* --enablerepo=serverchief --setopt=exit_on_lock=True install -y serverchief-<v>",
+	"<rpm> --disablerepo=* --enablerepo=serverchief --setopt=exit_on_lock=True downgrade -y serverchief-<v>",
+}
+
+// updateVerbs are the only mutating words an update argv may contain.
+var updateVerbs = map[string]bool{"install": true, "downgrade": true, "-y": true}
+
+// matchesUpdateCommand reports whether a normalized command line is an
+// allow-listed update argv. Placeholders match only their exact values.
+func matchesUpdateCommand(line string) bool {
+	version := `(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})`
+	for _, template := range allowedUpdateCommands {
+		pattern := regexp.QuoteMeta(template)
+		pattern = strings.ReplaceAll(pattern, "<sources>", "("+regexp.QuoteMeta(updater.AptListPath)+"|"+regexp.QuoteMeta(updater.AptSourcesPath)+")")
+		pattern = strings.ReplaceAll(pattern, "<rpm>", "(dnf|yum)")
+		pattern = strings.ReplaceAll(pattern, "<v>", version)
+		if regexp.MustCompile(`\A` + pattern + `\z`).MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestUpdateCommandAllowList builds every argv the agent update runs, on
+// apt (list and deb822), dnf and yum hosts, and checks each against
+// allowedUpdateCommands. Collectors and the metadata refresh stay on
+// allowedPackageCommands, which cannot install anything.
+func TestUpdateCommandAllowList(t *testing.T) {
+	var ran []string
+	record := func(_ context.Context, _ []string, argv []string) (updater.Output, error) {
+		ran = append(ran, strings.Join(argv, " "))
+		return updater.Output{ExitCode: 1}, nil
+	}
+	ctx := context.Background()
+	managers := []*updater.SystemManager{
+		{Commands: updater.Commands{Manager: updater.ManagerApt, Tool: "/usr/bin/apt-get", AptCache: "/usr/bin/apt-cache", Sources: updater.AptListPath}, DpkgQuery: "/usr/bin/dpkg-query"},
+		{Commands: updater.Commands{Manager: updater.ManagerApt, Tool: "/usr/bin/apt-get", AptCache: "/usr/bin/apt-cache", Sources: updater.AptSourcesPath}, DpkgQuery: "/usr/bin/dpkg-query"},
+		{Commands: updater.Commands{Manager: updater.ManagerDnf, Tool: "/usr/bin/dnf"}, RPM: "/usr/bin/rpm"},
+		{Commands: updater.Commands{Manager: updater.ManagerYum, Tool: "/usr/bin/yum"}, RPM: "/bin/rpm"},
+	}
+	for _, manager := range managers {
+		manager.Run = record
+		_, _ = manager.Installed(ctx)
+		_ = manager.Refresh(ctx)
+		_, _ = manager.Available(ctx)
+		_ = manager.Install(ctx, "1.3.0", "1.2.3") // upgrade
+		_ = manager.Install(ctx, "1.2.3", "1.3.0") // rollback
+		_ = manager.Install(ctx, "1.3.0", "")      // repair a missing package
+		_ = manager.Install(ctx, "1.3.0; reboot", "1.2.3")
+		_ = manager.Install(ctx, "1.3.0 nginx", "1.2.3")
+	}
+	// The capability probe's apt version query.
+	root := t.TempDir()
+	for _, name := range []string{"var/lib/dpkg/status", "usr/bin/dpkg-query", "usr/bin/apt-get", "usr/bin/apt-cache", "etc/apt/sources.list.d/serverchief.list"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	probeRun := func(ctx context.Context, env []string, argv []string) (updater.Output, error) {
+		_, _ = record(ctx, env, argv)
+		if slices.Contains(argv, "serverchief") {
+			return updater.Output{Stdout: []byte("ii |1.2.3")}, nil
+		}
+		return updater.Output{Stdout: []byte("2.6.1")}, nil
+	}
+	_ = updater.Probe{Version: "1.2.3", GOOS: "linux", Tools: updater.Tools{Root: root}, Run: probeRun}.Detect(ctx)
+
+	seen := map[string]bool{}
+	for _, line := range ran {
+		normalized := normalizeCommand(line)
+		seen[normalized] = true
+		if !matchesUpdateCommand(normalized) {
+			t.Errorf("update command %q is not allow-listed", normalized)
+		}
+		if slices.Contains(allowedPackageCommands(), normalized) {
+			t.Errorf("update command %q is on the collector allow-list", normalized)
+		}
+	}
+	if len(seen) != 19 {
+		t.Fatalf("%d distinct update commands ran, want 19: %q", len(seen), slices.Sorted(maps.Keys(seen)))
+	}
+	for _, template := range allowedUpdateCommands {
+		matched := false
+		for command := range seen {
+			pattern := strings.NewReplacer("<sources>", updater.AptListPath, "<rpm>", "dnf", "<v>", "1.3.0").Replace(template)
+			alternate := strings.NewReplacer("<sources>", updater.AptSourcesPath, "<rpm>", "yum", "<v>", "1.2.3").Replace(template)
+			matched = matched || command == pattern || command == alternate
+		}
+		if !matched {
+			t.Errorf("allow-listed %q never ran; keep the list exact", template)
+		}
+		fields := strings.Fields(template)
+		mutating := false
+		for _, word := range fields {
+			if forbiddenPackageVerbs[word] {
+				mutating = true
+				if !updateVerbs[word] {
+					t.Errorf("update entry %q contains %q", template, word)
+				}
+			}
+		}
+		if mutating {
+			last := fields[len(fields)-1]
+			restricted := strings.Contains(template, "--disablerepo=* --enablerepo=serverchief ") ||
+				strings.Contains(template, "-o Dir::Etc::sourcelist=<sources> -o Dir::Etc::sourceparts=-")
+			if (last != "serverchief=<v>" && last != "serverchief-<v>") || !restricted {
+				t.Errorf("update entry %q does not install exactly serverchief from the Server Chief repository", template)
+			}
+		}
+	}
+	install := "apt-get install -y --only-upgrade --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/serverchief.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 serverchief=1.3.0"
+	for _, rejected := range []string{
+		"apt-get install -y serverchief=1.3.0",
+		install + " nginx",
+		strings.Replace(install, "serverchief=1.3.0", "serverchief=1.3.0;id", 1),
+		strings.Replace(install, "serverchief=1.3.0", "serverchief=1.3", 1),
+		strings.Replace(install, "serverchief=1.3.0", "nginx=1.3.0", 1),
+		strings.Replace(install, "serverchief.list", "../../sources.list", 1),
+		strings.Replace(install, "/etc/apt/sources.list.d/serverchief.list", "/etc/apt/sources.list", 1),
+		strings.Replace(install, " -o Dir::Etc::sourceparts=-", "", 1),
+		strings.Replace(install, "install", "dist-upgrade", 1),
+		"dnf install -y serverchief-1.3.0",
+		"dnf --disablerepo=* --enablerepo=serverchief --setopt=exit_on_lock=True install -y serverchief-1.3.0 nginx",
+		"dnf --disablerepo=* --enablerepo=epel --setopt=exit_on_lock=True install -y serverchief-1.3.0",
+		"yum --disablerepo=* --enablerepo=serverchief --setopt=exit_on_lock=True install -y serverchief-latest",
+		"yum --disablerepo=* --enablerepo=serverchief --setopt=exit_on_lock=True upgrade -y serverchief-1.3.0",
+		"zypper --disablerepo=* --enablerepo=serverchief --setopt=exit_on_lock=True install -y serverchief-1.3.0",
+		"dnf --disablerepo=* --enablerepo=serverchief --setopt=exit_on_lock=True install -y serverchief-1.3.0\nid",
+	} {
+		if matchesUpdateCommand(rejected) {
+			t.Errorf("%q matches the update allow-list", rejected)
+		}
+	}
+}
+
 // TestNoMutatingPackageVerbsInSource scans the agent's Go sources for a
 // string literal that is a mutating package-manager verb, so a new code
 // path cannot add one without this test noticing. ("update" is apt-get's
 // metadata refresh and dist-upgrade only appears with -s.) initsys runs
 // no package manager (its update-rc.d "remove" is a service command) and
-// is not scanned.
+// is not scanned. The agent update's argv builder, updater/commands.go,
+// is the one file allowed to spell out install, downgrade and -y.
 func TestNoMutatingPackageVerbsInSource(t *testing.T) {
+	const updateCommands = "../updater/commands.go"
+	allowedIn := map[string]map[string]bool{updateCommands: updateVerbs}
+	used := map[string]bool{}
 	var files []string
-	for _, directory := range []string{".", "../agent", "../cmd", "../pkglock"} {
+	for _, directory := range []string{".", "../agent", "../cmd", "../pkglock", "../updater"} {
 		matches, err := filepath.Glob(filepath.Join(directory, "*.go"))
 		if err != nil {
 			t.Fatal(err)
@@ -481,9 +642,18 @@ func TestNoMutatingPackageVerbsInSource(t *testing.T) {
 				return true
 			}
 			if forbiddenPackageVerbs[value] {
+				if allowedIn[name][value] {
+					used[value] = true
+					return true
+				}
 				t.Errorf("%s: string literal %q is a mutating package-manager verb", fileSet.Position(literal.Pos()), value)
 			}
 			return true
 		})
+	}
+	for verb := range updateVerbs {
+		if !used[verb] {
+			t.Errorf("%s no longer uses %q; drop it from the exemption", updateCommands, verb)
+		}
 	}
 }

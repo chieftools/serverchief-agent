@@ -16,6 +16,7 @@ import (
 	"go.chief.tools/serverchief-agent/inventory"
 	"go.chief.tools/serverchief-agent/logging"
 	"go.chief.tools/serverchief-agent/systemdnotify"
+	"go.chief.tools/serverchief-agent/updater"
 )
 
 func newRunCommand(version string, configPath *string) *cobra.Command {
@@ -109,6 +110,8 @@ the systemd unit does not restart.`,
 				log.Printf("[agent] %s=1: development-only short package intervals %+v", debugIntervalsEnv, timings)
 			}
 
+			updates := updater.NewController(version, initsys.DetectSystem(), paths.Updates, os.Geteuid())
+
 			ctx := command.Context()
 			reload := make(chan agent.Config)
 			stopReload := watchReload(ctx, *configPath, logWriter, reload)
@@ -133,6 +136,7 @@ the systemd unit does not restart.`,
 				PackageTimings: timings,
 				RecordRefresh:  recordRefresh,
 				ChangePoll:     changePoll,
+				Updates:        updates,
 				Ready: func() {
 					_ = systemdnotify.NotifyReady("collecting inventory")
 				},

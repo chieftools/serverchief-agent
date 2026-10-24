@@ -244,6 +244,12 @@ func (daemon *daemon) startRefresh(ctx context.Context, now time.Time) {
 			cache.UTC().Format(time.RFC3339), interval, work.refreshAt.Sub(now).Round(time.Second))
 		return
 	}
+	if daemon.update.inProgress {
+		// The update helper drives the package manager; stay out of its way.
+		work.refreshAt = now.Add(daemon.lockRetry())
+		log.Printf("[packages] metadata refresh skipped: an agent update is in progress; retrying in %s", work.refreshAt.Sub(now).Round(time.Second))
+		return
+	}
 	if lock, _, held := daemon.options.Packages.BusyLock(); held {
 		work.refreshAt = now.Add(daemon.lockRetry())
 		log.Printf("[packages] metadata refresh skipped: %s is held; retrying in %s", lock, work.refreshAt.Sub(now).Round(time.Second))

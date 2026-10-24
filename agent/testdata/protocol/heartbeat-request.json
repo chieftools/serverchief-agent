@@ -1,5 +1,11 @@
 {
   "agent_version": "0.1.0",
+  "capabilities": {
+    "agent_update": {
+      "available": true,
+      "reason": null
+    }
+  },
   "hashes": {
     "hardware": "a890c037f87a2721483976db58177bc4d4b434a1d38583683ac1f7a00eb16be3",
     "network": "65df6948f9c72d08ee4bbf18543df64fc119c08361d4b73bc1a33d012f5fe799",

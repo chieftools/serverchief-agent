@@ -38,6 +38,22 @@ func TestCommandFixturesRoundTrip(t *testing.T) {
 	if encoded, _ := json.Marshal(result); !sameJSON(t, encoded, fixture) {
 		t.Fatalf("CommandResult does not round-trip the fixture:\n%s", encoded)
 	}
+
+	fixture = readFixture(t, "update-agent-result-request.json")
+	result = CommandResult{}
+	if err := json.Unmarshal(fixture, &result); err != nil {
+		t.Fatal(err)
+	}
+	var data AgentUpdateData
+	if err := json.Unmarshal(result.Data, &data); err != nil || data.Code != "updated" || data.PreviousVersion != "0.4.0" || data.InstalledVersion != "0.5.0" {
+		t.Fatalf("update data = %+v (%v)", data, err)
+	}
+	if encoded, _ := json.Marshal(result); !sameJSON(t, encoded, fixture) {
+		t.Fatalf("update_agent CommandResult does not round-trip the fixture:\n%s", encoded)
+	}
+	if encoded, _ := json.Marshal(CommandResult{Status: CommandFailed, Data: updateData("install_failed", "0.4.0", "0.5.0", "0.4.0")}); !strings.Contains(string(encoded), `"data":{"code":"install_failed","previous_version":"0.4.0","target_version":"0.5.0","installed_version":"0.4.0"}`) {
+		t.Fatalf("encoded result = %s", encoded)
+	}
 }
 
 func TestHTTPClientCommandEndpoints(t *testing.T) {
@@ -207,7 +223,7 @@ func TestUnknownCommandKindIsAcknowledgedAndFailed(t *testing.T) {
 	daemon := setup.start(t)
 	tick(t, daemon)
 
-	setup.server.addCommand("c9", "update_agent", `{"version":"2.0.0"}`)
+	setup.server.addCommand("c9", "reboot", `{}`)
 	before := len(setup.server.requestLog())
 	heartbeatNow(daemon)
 	tick(t, daemon)
@@ -215,7 +231,7 @@ func TestUnknownCommandKindIsAcknowledgedAndFailed(t *testing.T) {
 		t.Fatalf("requests = %q", got)
 	}
 	results := setup.server.resultsOf("c9")
-	if len(results) != 1 || results[0].Status != CommandFailed || results[0].Detail == nil || *results[0].Detail != `unsupported command kind "update_agent"` {
+	if len(results) != 1 || results[0].Status != CommandFailed || results[0].Detail == nil || *results[0].Detail != `unsupported command kind "reboot"` {
 		t.Fatalf("results = %+v", results)
 	}
 }
