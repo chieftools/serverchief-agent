@@ -1,0 +1,28 @@
+repo id                      repo name                                  status
+appstream                    AlmaLinux 9 - AppStream                    enabled
+appstream-debuginfo          AlmaLinux 9 - AppStream - Debug            disabled
+appstream-source             AlmaLinux 9 - AppStream - Source           disabled
+baseos                       AlmaLinux 9 - BaseOS                       enabled
+baseos-debuginfo             AlmaLinux 9 - BaseOS - Debug               disabled
+baseos-source                AlmaLinux 9 - BaseOS - Source              disabled
+crb                          AlmaLinux 9 - CRB                          disabled
+crb-debuginfo                AlmaLinux 9 - CRB - Debug                  disabled
+crb-source                   AlmaLinux 9 - CRB - Source                 disabled
+extras                       AlmaLinux 9 - Extras                       enabled
+extras-debuginfo             AlmaLinux 9 - Extras - Debug               disabled
+extras-source                AlmaLinux 9 - Extras - Source              disabled
+highavailability             AlmaLinux 9 - HighAvailability             disabled
+highavailability-debuginfo   AlmaLinux 9 - HighAvailability - Debug     disabled
+highavailability-source      AlmaLinux 9 - HighAvailability - Source    disabled
+plus                         AlmaLinux 9 - Plus                         disabled
+plus-debuginfo               AlmaLinux 9 - Plus - Debug                 disabled
+plus-source                  AlmaLinux 9 - Plus - Source                disabled
+resilientstorage             AlmaLinux 9 - ResilientStorage             disabled
+resilientstorage-debuginfo   AlmaLinux 9 - ResilientStorage - Debug     disabled
+resilientstorage-source      AlmaLinux 9 - ResilientStorage - Source    disabled
+sap                          AlmaLinux 9 - SAP                          disabled
+sap-debuginfo                AlmaLinux 9 - SAP - Debug                  disabled
+sap-source                   AlmaLinux 9 - SAP - Source                 disabled
+saphana                      AlmaLinux 9 - SAPHANA                      disabled
+saphana-debuginfo            AlmaLinux 9 - SAPHANA - Debug              disabled
+saphana-source               AlmaLinux 9 - SAPHANA - Source             disabled

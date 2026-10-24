@@ -41,6 +41,12 @@ type Package struct {
 	// one is installed under the same name and arch (rpm installonly
 	// packages such as kernel-core).
 	Versions []string `json:"versions,omitempty"`
+	// Origins are the sorted ids of the repositories (the repositories
+	// dataset) that offer the installed version. Empty means none does
+	// (a manually installed package, a removed repository, a version gone
+	// from the mirror); nil, which is left out, means it could not be
+	// determined, for example before the first apt-get update.
+	Origins []string `json:"origins,omitzero"`
 }
 
 // PackageKey is the delta key: manager/name/arch.
@@ -78,10 +84,21 @@ var errNoPackageManager = errors.New("no supported package manager (dpkg or rpm)
 
 // Packages collects the packages dataset.
 type Packages struct {
-	host *Host
+	host    *Host
+	origins *Origins
 }
 
-func NewPackages(host *Host) *Packages { return &Packages{host: host} }
+// NewPackages returns the collector with a private origin resolver.
+func NewPackages(host *Host) *Packages { return NewPackagesWithOrigins(host, nil) }
+
+// NewPackagesWithOrigins returns the collector sharing origins with the
+// repositories collector; nil uses a private one.
+func NewPackagesWithOrigins(host *Host, origins *Origins) *Packages {
+	if origins == nil {
+		origins = NewOrigins(host)
+	}
+	return &Packages{host: host, origins: origins}
+}
 
 func (*Packages) Name() string { return "packages" }
 
@@ -91,26 +108,32 @@ func (*Packages) DeltaKeyFields() []string { return []string{"manager", "name", 
 
 func (collector *Packages) Collect(ctx context.Context) (any, error) {
 	host := collector.host
+	var info *PackagesInfo
 	switch host.packageManager() {
 	case ManagerDpkg:
 		data, err := host.readFile(dpkgStatusPath)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", dpkgStatusPath, err)
 		}
-		info := &PackagesInfo{Manager: ManagerDpkg, Items: collapsePackages(parseDpkgStatus(data), compareDebianVersions)}
-		info.Normalize()
-		return info, nil
+		info = &PackagesInfo{Manager: ManagerDpkg, Items: collapsePackages(parseDpkgStatus(data), compareDebianVersions)}
 	case ManagerRPM:
 		packages, err := host.queryRPM(ctx)
 		if err != nil {
 			return nil, err
 		}
-		info := &PackagesInfo{Manager: ManagerRPM, Items: collapsePackages(packages, compareRPMVersions)}
-		info.Normalize()
-		return info, nil
+		info = &PackagesInfo{Manager: ManagerRPM, Items: collapsePackages(packages, compareRPMVersions)}
 	default:
 		return nil, errNoPackageManager
 	}
+	if collector.origins != nil {
+		index, err := collector.origins.resolve(ctx)
+		if err != nil {
+			return nil, err
+		}
+		index.apply(info.Items)
+	}
+	info.Normalize()
+	return info, nil
 }
 
 // packageManager returns dpkg when its status database exists, rpm when an

@@ -335,3 +335,69 @@ func TestCertificatesDeltaReproducesHashOnTheBackend(t *testing.T) {
 		t.Fatalf("backend hash %s (%v), agent sent %s", hash, err, dataset.Hash)
 	}
 }
+
+// TestRepositoriesFixtureMatchesCollectorTypes decodes the spec's
+// repositories payload, and the packages payload whose origins refer to
+// it, into the collector types: re-encoding must reproduce the fixture
+// hashes, every origin must name a repository and each repository's
+// packages count must match the origins.
+func TestRepositoriesFixtureMatchesCollectorTypes(t *testing.T) {
+	var envelope inventory.Envelope
+	if err := json.Unmarshal(readFixture(t, "inventory-repositories-request.json"), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	targets := map[string]any{"repositories": &collector.RepositoriesInfo{}, "packages": &collector.PackagesInfo{}}
+	for name, target := range targets {
+		dataset, ok := envelope.Datasets[name]
+		if !ok || dataset.Mode != inventory.ModeFull {
+			t.Fatalf("fixture lacks a full %s dataset", name)
+		}
+		if hash, err := inventory.HashValue(json.RawMessage(dataset.Payload)); err != nil || hash != dataset.Hash {
+			t.Fatalf("%s: canonical hash %s (%v), fixture says %s", name, hash, err, dataset.Hash)
+		}
+		decoder := json.NewDecoder(strings.NewReader(string(dataset.Payload)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(target); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if hash, err := inventory.HashValue(target); err != nil || hash != dataset.Hash {
+			t.Errorf("%s: collector type hashes to %s (%v), fixture says %s", name, hash, err, dataset.Hash)
+		}
+	}
+	repositories := targets["repositories"].(*collector.RepositoriesInfo)
+	packages := targets["packages"].(*collector.PackagesInfo)
+	counts := map[string]int{}
+	empty := 0
+	for _, item := range packages.Items {
+		if item.Origins == nil {
+			t.Errorf("%s: origins left out", item.Name)
+		}
+		if len(item.Origins) == 0 {
+			empty++
+		}
+		if !slices.IsSorted(item.Origins) {
+			t.Errorf("%s: origins %v are not sorted", item.Name, item.Origins)
+		}
+		for _, id := range item.Origins {
+			counts[id]++
+		}
+	}
+	if empty == 0 {
+		t.Error("the fixture has no package without origins")
+	}
+	ids := map[string]bool{}
+	for _, item := range repositories.Items {
+		ids[item.ID] = true
+		if suite, _, found := strings.Cut(item.ID, ":"); !found || suite != item.Suite {
+			t.Errorf("apt id %q is not prefixed with its suite %q", item.ID, item.Suite)
+		}
+		if item.Packages != counts[item.ID] {
+			t.Errorf("%s counts %d packages, the origins %d", item.ID, item.Packages, counts[item.ID])
+		}
+	}
+	for id := range counts {
+		if !ids[id] {
+			t.Errorf("origin %s names no repository", id)
+		}
+	}
+}

@@ -100,9 +100,21 @@ type packageWork struct {
 }
 
 const (
-	datasetPackages = "packages"
-	datasetUpdates  = "updates"
+	datasetPackages     = "packages"
+	datasetUpdates      = "updates"
+	datasetRepositories = "repositories"
 )
+
+// activityDatasets are collected after package activity: the installed
+// packages, what is pending, and how many packages each repository
+// provides.
+var activityDatasets = []string{datasetPackages, datasetUpdates, datasetRepositories}
+
+// refreshDatasets are collected after a successful metadata refresh: new
+// metadata changes what is pending and, on apt, how many installed
+// packages the repositories still offer. packages, whose origins can
+// change too, waits for its interval: the package database did not change.
+var refreshDatasets = []string{datasetUpdates, datasetRepositories}
 
 // packagesActive reports whether the activity trigger has a dataset to
 // collect.
@@ -110,9 +122,12 @@ func (daemon *daemon) packagesActive() bool {
 	if daemon.options.Packages == nil {
 		return false
 	}
-	_, packages := daemon.next[datasetPackages]
-	_, updates := daemon.next[datasetUpdates]
-	return packages || updates
+	for _, name := range activityDatasets {
+		if _, enabled := daemon.next[name]; enabled {
+			return true
+		}
+	}
+	return false
 }
 
 // refreshSettings returns whether the metadata refresh runs, and its
@@ -196,7 +211,7 @@ func (daemon *daemon) pollPackageActivity(now time.Time) {
 	case token != work.token:
 		work.token = token
 		if !work.pending {
-			log.Printf("[packages] package database changed; collecting packages and updates once it has been idle for %s", work.timings.Idle)
+			log.Printf("[packages] package database changed; collecting packages, updates and repositories once it has been idle for %s", work.timings.Idle)
 		}
 		work.pending, work.changedAt, work.waiting = true, now, ""
 	}
@@ -211,12 +226,12 @@ func (daemon *daemon) pollPackageActivity(now time.Time) {
 		return
 	}
 	if held {
-		log.Printf("[packages] %s has been held for %s; collecting packages and updates anyway", lock, heldFor.Round(time.Second))
+		log.Printf("[packages] %s has been held for %s; collecting packages, updates and repositories anyway", lock, heldFor.Round(time.Second))
 	} else {
-		log.Printf("[packages] package activity finished; collecting packages and updates now")
+		log.Printf("[packages] package activity finished; collecting packages, updates and repositories now")
 	}
 	work.pending, work.waiting = false, ""
-	for _, name := range []string{datasetPackages, datasetUpdates} {
+	for _, name := range activityDatasets {
 		if _, enabled := daemon.next[name]; enabled {
 			daemon.next[name] = now
 		}
@@ -285,13 +300,16 @@ func (daemon *daemon) finishRefresh(err error, now time.Time) {
 				log.Printf("[packages] record the refresh: %v", err)
 			}
 		}
-		if _, updates := daemon.next[datasetUpdates]; updates {
-			daemon.next[datasetUpdates] = now
+		for _, name := range refreshDatasets {
+			if _, enabled := daemon.next[name]; !enabled {
+				continue
+			}
+			daemon.next[name] = now
 			// The refresh moved the cache: do not collect a second time when
 			// the change poll notices.
-			if instance, ok := daemon.options.Registry.Get(datasetUpdates); ok {
+			if instance, ok := daemon.options.Registry.Get(name); ok {
 				if detector, detects := instance.(collector.ChangeDetector); detects {
-					daemon.changeTokens[datasetUpdates] = detector.ChangeToken()
+					daemon.changeTokens[name] = detector.ChangeToken()
 				}
 			}
 		}

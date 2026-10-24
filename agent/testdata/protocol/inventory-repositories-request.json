@@ -1,0 +1,268 @@
+{
+  "collected_at": "2026-10-24T12:00:00Z",
+  "datasets": {
+    "packages": {
+      "hash": "dde7184ab4425ecb694f45c6a841bffc1a5347af159d25493383061452aa778e",
+      "mode": "full",
+      "payload": {
+        "items": [
+          {
+            "arch": "amd64",
+            "name": "base-files",
+            "origins": [
+              "bookworm:5e1c9a2f"
+            ],
+            "version": "12.4+deb12u7"
+          },
+          {
+            "arch": "amd64",
+            "name": "custom-agent",
+            "origins": [],
+            "version": "2.4.1"
+          },
+          {
+            "arch": "all",
+            "name": "internal-config",
+            "origins": [
+              "bookworm:91f4a6c0"
+            ],
+            "version": "1.2-3"
+          },
+          {
+            "arch": "amd64",
+            "name": "libssl3",
+            "origins": [
+              "bookworm-security:3f2a9c1e"
+            ],
+            "source": "openssl",
+            "version": "3.0.15-1~deb12u1"
+          },
+          {
+            "arch": "amd64",
+            "name": "nodejs",
+            "origins": [
+              "nodistro:7a9f0c3b"
+            ],
+            "version": "20.18.0-1nodesource1"
+          },
+          {
+            "arch": "amd64",
+            "name": "openssl",
+            "origins": [
+              "bookworm-security:3f2a9c1e"
+            ],
+            "version": "3.0.15-1~deb12u1"
+          },
+          {
+            "arch": "amd64",
+            "name": "php8.3-cli",
+            "origins": [
+              "bookworm:c4a17d93"
+            ],
+            "source": "php8.3",
+            "version": "8.3.12-1+0~20240927.43+debian12~1.gbpad3b8c"
+          },
+          {
+            "arch": "amd64",
+            "name": "php8.3-common",
+            "origins": [
+              "bookworm:c4a17d93"
+            ],
+            "source": "php8.3",
+            "version": "8.3.12-1+0~20240927.43+debian12~1.gbpad3b8c"
+          },
+          {
+            "arch": "all",
+            "name": "tzdata",
+            "origins": [
+              "bookworm-updates:8b3d4e07",
+              "bookworm:5e1c9a2f"
+            ],
+            "version": "2024a-0+deb12u1"
+          },
+          {
+            "arch": "amd64",
+            "name": "wkhtmltox",
+            "origins": [],
+            "version": "1:0.12.6.1-3.bookworm"
+          }
+        ],
+        "manager": "dpkg"
+      }
+    },
+    "repositories": {
+      "hash": "c673465880bcf501516a7388a82a3963a1371432aac158a1c173a38e50cbbb28",
+      "mode": "full",
+      "payload": {
+        "items": [
+          {
+            "components": [
+              "main",
+              "contrib"
+            ],
+            "enabled": true,
+            "file": "/etc/apt/sources.list.d/debian.sources",
+            "id": "bookworm:5e1c9a2f",
+            "packages": 2,
+            "signing": {
+              "gpgcheck": null,
+              "signed_by": "/usr/share/keyrings/debian-archive-keyring.gpg",
+              "trusted": false
+            },
+            "suite": "bookworm",
+            "transport": "https",
+            "type": "deb",
+            "uris": [
+              "https://deb.debian.org/debian"
+            ]
+          },
+          {
+            "components": [
+              "main",
+              "contrib"
+            ],
+            "enabled": true,
+            "file": "/etc/apt/sources.list.d/debian.sources",
+            "id": "bookworm-updates:8b3d4e07",
+            "packages": 1,
+            "signing": {
+              "gpgcheck": null,
+              "signed_by": "/usr/share/keyrings/debian-archive-keyring.gpg",
+              "trusted": false
+            },
+            "suite": "bookworm-updates",
+            "transport": "https",
+            "type": "deb",
+            "uris": [
+              "https://deb.debian.org/debian"
+            ]
+          },
+          {
+            "components": [
+              "main",
+              "contrib"
+            ],
+            "enabled": true,
+            "file": "/etc/apt/sources.list.d/debian.sources",
+            "id": "bookworm-security:3f2a9c1e",
+            "packages": 2,
+            "signing": {
+              "gpgcheck": null,
+              "signed_by": "/usr/share/keyrings/debian-archive-keyring.gpg",
+              "trusted": false
+            },
+            "suite": "bookworm-security",
+            "transport": "https",
+            "type": "deb",
+            "uris": [
+              "https://security.debian.org/debian-security"
+            ]
+          },
+          {
+            "components": [
+              "main"
+            ],
+            "enabled": true,
+            "file": "/etc/apt/sources.list.d/php.list",
+            "id": "bookworm:c4a17d93",
+            "packages": 2,
+            "signing": {
+              "gpgcheck": null,
+              "signed_by": "/usr/share/keyrings/deb.sury.org-php.gpg",
+              "trusted": false
+            },
+            "suite": "bookworm",
+            "transport": "https",
+            "type": "deb",
+            "uris": [
+              "https://packages.sury.org/php"
+            ]
+          },
+          {
+            "components": [
+              "main",
+              "contrib"
+            ],
+            "enabled": false,
+            "file": "/etc/apt/sources.list.d/debian.sources",
+            "id": "bookworm:0d6e2b58",
+            "packages": 0,
+            "signing": {
+              "gpgcheck": null,
+              "signed_by": "/usr/share/keyrings/debian-archive-keyring.gpg",
+              "trusted": false
+            },
+            "suite": "bookworm",
+            "transport": "https",
+            "type": "deb-src",
+            "uris": [
+              "https://deb.debian.org/debian"
+            ]
+          },
+          {
+            "components": [
+              "main"
+            ],
+            "enabled": true,
+            "file": "/etc/apt/sources.list.d/nodesource.list",
+            "id": "nodistro:7a9f0c3b",
+            "packages": 1,
+            "signing": {
+              "gpgcheck": null,
+              "signed_by": null,
+              "trusted": true
+            },
+            "suite": "nodistro",
+            "transport": "http",
+            "type": "deb",
+            "uris": [
+              "http://deb.nodesource.com/node_20.x"
+            ]
+          },
+          {
+            "components": [
+              "main"
+            ],
+            "enabled": true,
+            "file": "/etc/apt/sources.list.d/backports.list",
+            "id": "buster-backports:e2b8f1d6",
+            "packages": 0,
+            "signing": {
+              "gpgcheck": null,
+              "signed_by": null,
+              "trusted": false
+            },
+            "suite": "buster-backports",
+            "transport": "http",
+            "type": "deb",
+            "uris": [
+              "http://archive.debian.org/debian"
+            ]
+          },
+          {
+            "components": [
+              "main"
+            ],
+            "enabled": true,
+            "file": "/etc/apt/sources.list.d/internal.list",
+            "id": "bookworm:91f4a6c0",
+            "packages": 1,
+            "signing": {
+              "gpgcheck": null,
+              "signed_by": "/etc/apt/keyrings/internal.asc",
+              "trusted": false
+            },
+            "suite": "bookworm",
+            "transport": "https",
+            "type": "deb",
+            "uris": [
+              "https://apt.example.test/internal"
+            ]
+          }
+        ],
+        "manager": "apt"
+      }
+    }
+  },
+  "seq": 7
+}

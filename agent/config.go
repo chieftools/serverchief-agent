@@ -34,6 +34,10 @@ var DefaultIntervals = map[string]time.Duration{
 	// certificates is also collected early when renewal or certificate
 	// directories change.
 	"certificates": time.Hour,
+	// repositories is also collected early when the sources or repository
+	// files or apt's lists change, after a metadata refresh and after
+	// package activity.
+	"repositories": time.Hour,
 	// cloud is also collected at agent start, like every enabled dataset.
 	"cloud": 24 * time.Hour,
 }

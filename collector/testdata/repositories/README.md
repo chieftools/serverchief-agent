@@ -1,0 +1,1 @@
+`synthetic_Packages.lz4` is `lz4 -9 -BD -B4 --content-size` (lz4 1.10.0) of the synthetic Packages file that `syntheticPackages()` in `repositories_test.go` generates: linked 64 KiB blocks, so back references cross block boundaries. Its package names are fake.

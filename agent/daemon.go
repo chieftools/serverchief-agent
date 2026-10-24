@@ -596,9 +596,9 @@ func (daemon *daemon) pollChanges(now time.Time) {
 		if !ok {
 			continue
 		}
-		if name == datasetUpdates && daemon.packages.running {
+		if daemon.packages.running && slices.Contains(refreshDatasets, name) {
 			// Our own refresh is moving the cache and holds the lock; its
-			// completion collects updates and records the new token.
+			// completion collects these and records the new token.
 			continue
 		}
 		token := detector.ChangeToken()

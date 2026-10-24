@@ -534,8 +534,9 @@ func TestOwnRefreshDoesNotTriggerCollections(t *testing.T) {
 	server := newProtocolServer(t)
 	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 	updates := &changingCollector{fakeCollector: fakeCollector{name: "updates", data: 1}, token: "cache@1"}
-	setup := newTestSetup(t, &fakeCollector{name: "packages", data: 1}, updates)
-	options := setup.options(t, server.client(), "packages", "updates")
+	repositories := &changingCollector{fakeCollector: fakeCollector{name: "repositories", data: 1}, token: "lists@1"}
+	setup := newTestSetup(t, &fakeCollector{name: "packages", data: 1}, updates, repositories)
+	options := setup.options(t, server.client(), "packages", "updates", "repositories")
 	options.Now = func() time.Time { return now }
 	system := &fakePackages{token: "status@1"}
 	release := make(chan struct{})
@@ -545,6 +546,9 @@ func TestOwnRefreshDoesNotTriggerCollections(t *testing.T) {
 		updates.mu.Lock()
 		updates.token = "cache@2"
 		updates.mu.Unlock()
+		repositories.mu.Lock()
+		repositories.token = "lists@2"
+		repositories.mu.Unlock()
 		system.set(func(fake *fakePackages) { fake.lock = "/var/lib/apt/lists/lock (fcntl, pid 7)" })
 		<-release
 		system.set(func(fake *fakePackages) { fake.lock = "" })
@@ -553,7 +557,7 @@ func TestOwnRefreshDoesNotTriggerCollections(t *testing.T) {
 	daemon := newDaemon(options)
 	daemon.pollChanges(now)
 	daemon.pollPackageActivity(now)
-	daemon.next["packages"], daemon.next["updates"] = now.Add(time.Hour), now.Add(time.Hour)
+	daemon.next["packages"], daemon.next["updates"], daemon.next["repositories"] = now.Add(time.Hour), now.Add(time.Hour), now.Add(time.Hour)
 
 	daemon.packages.refreshAt = now
 	daemon.startRefresh(context.Background(), now)
@@ -565,17 +569,44 @@ func TestOwnRefreshDoesNotTriggerCollections(t *testing.T) {
 		daemon.pollChanges(now)
 		daemon.pollPackageActivity(now)
 	}
-	if daemon.next["packages"].Before(now.Add(time.Minute)) || daemon.next["updates"].Before(now.Add(time.Minute)) {
-		t.Fatal("the agent's own refresh triggered a collection")
+	for _, name := range []string{"packages", "updates", "repositories"} {
+		if daemon.next[name].Before(now.Add(time.Minute)) {
+			t.Fatalf("the agent's own refresh triggered a %s collection", name)
+		}
 	}
 	close(release)
 	daemon.finishRefresh(<-daemon.packages.done, now)
-	if !daemon.next["updates"].Equal(now) || !daemon.next["packages"].After(now) {
-		t.Fatal("a successful refresh must collect updates only")
+	if !daemon.next["updates"].Equal(now) || !daemon.next["repositories"].Equal(now) || !daemon.next["packages"].After(now) {
+		t.Fatal("a successful refresh must collect updates and repositories only")
 	}
-	daemon.next["updates"] = now.Add(time.Hour)
+	daemon.next["updates"], daemon.next["repositories"] = now.Add(time.Hour), now.Add(time.Hour)
 	daemon.pollChanges(now.Add(time.Minute))
-	if !daemon.next["updates"].After(now.Add(time.Minute)) {
-		t.Fatal("the change poll collected updates a second time")
+	if !daemon.next["updates"].After(now.Add(time.Minute)) || !daemon.next["repositories"].After(now.Add(time.Minute)) {
+		t.Fatal("the change poll collected a second time")
+	}
+}
+
+// TestPackageActivityCollectsRepositories: the repositories' package
+// counts follow package activity, even with only repositories enabled.
+func TestPackageActivityCollectsRepositories(t *testing.T) {
+	server := newProtocolServer(t)
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	setup := newTestSetup(t, &fakeCollector{name: "repositories", data: 1})
+	options := setup.options(t, server.client(), "repositories")
+	system := &fakePackages{token: "status@1"}
+	options.Packages = system
+	options.Now = func() time.Time { return now }
+	daemon := newDaemon(options)
+	if !daemon.packagesActive() {
+		t.Fatal("the activity trigger ignores repositories")
+	}
+	daemon.pollPackageActivity(now)
+	daemon.next["repositories"] = now.Add(time.Hour)
+	system.set(func(fake *fakePackages) { fake.token = "status@2" })
+	daemon.pollPackageActivity(now)
+	later := now.Add(3 * time.Minute)
+	daemon.pollPackageActivity(later)
+	if !daemon.next["repositories"].Equal(later) {
+		t.Fatalf("repositories due at %s after package activity", daemon.next["repositories"])
 	}
 }

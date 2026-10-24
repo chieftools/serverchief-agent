@@ -43,7 +43,7 @@ func TestRegistry(t *testing.T) {
 
 func TestDefaultRegistryDatasets(t *testing.T) {
 	registry := Default(&Host{FS: fstest.MapFS{}})
-	if names := registry.Names(); !reflect.DeepEqual(names, []string{"certificates", "cloud", "hardware", "network", "packages", "resolvers", "system", "updates", "vhosts"}) {
+	if names := registry.Names(); !reflect.DeepEqual(names, []string{"certificates", "cloud", "hardware", "network", "packages", "repositories", "resolvers", "system", "updates", "vhosts"}) {
 		t.Fatalf("Names() = %v", names)
 	}
 	if names := registry.DefaultNames(); !reflect.DeepEqual(names, []string{"hardware", "network", "resolvers", "system"}) {

@@ -310,6 +310,12 @@ var allowedCollectionCommands = []string{
 	"dnf -C -q --setopt=exit_on_lock=True check-update",
 	"dnf -C -q --setopt=exit_on_lock=True updateinfo list --security",
 	"needs-restarting -r",
+	// repositories: the effective enabled state, and the packages'
+	// origins (also for the packages dataset).
+	"yum -C -q --setopt=exit_on_lock=True repolist all",
+	"yum -C -q --setopt=exit_on_lock=True list installed",
+	"dnf -C -q --setopt=exit_on_lock=True repolist --all",
+	"dnf -C -q --setopt=exit_on_lock=True repoquery --installed --qf " + rpmFromRepoFormat,
 }
 
 // allowedRefreshCommands are the metadata refreshes, each run as is or
@@ -359,6 +365,8 @@ func TestPackageCommandAllowList(t *testing.T) {
 			"yum -C -q --setopt=exit_on_lock=True updateinfo list security": {file: "updateinfo-security.txt"},
 			"rpm -qa":                      {file: "rpm-qa.txt"},
 			"/usr/bin/needs-restarting -r": {file: "needs-restarting.txt"},
+			"yum -C -q --setopt=exit_on_lock=True repolist all":   {file: "repolist.txt"},
+			"yum -C -q --setopt=exit_on_lock=True list installed": {file: "list-installed.txt"},
 		}},
 		{"almalinux-9", osAlma9, map[string]string{
 			"usr/bin/dnf": "", "usr/bin/yum": "", "usr/bin/needs-restarting": "", "var/lib/rpm/rpmdb.sqlite": "",
@@ -367,6 +375,8 @@ func TestPackageCommandAllowList(t *testing.T) {
 			"dnf -C -q --setopt=exit_on_lock=True updateinfo list --security": {file: "updateinfo-security.txt"},
 			"rpm -qa":                      {file: "rpm-qa.txt"},
 			"/usr/bin/needs-restarting -r": {file: "needs-restarting-required.txt", exit: 1},
+			"dnf -C -q --setopt=exit_on_lock=True repolist --all": {file: "repolist.txt"},
+			"dnf -C -q --setopt=exit_on_lock=True repoquery":      {file: "repoquery-from-repo.txt"},
 		}},
 	}
 	seen := map[string]bool{}

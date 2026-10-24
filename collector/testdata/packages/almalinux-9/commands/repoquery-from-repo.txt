@@ -1,0 +1,316 @@
+acl	aarch64	baseos
+
+almalinux-gpg-keys	aarch64	baseos
+
+almalinux-release	aarch64	baseos
+
+almalinux-repos	aarch64	baseos
+
+alternatives	aarch64	baseos
+
+attr	aarch64	baseos
+
+audit-libs	aarch64	baseos
+
+basesystem	noarch	baseos
+
+bash	aarch64	baseos
+
+binutils	aarch64	baseos
+
+binutils-gold	aarch64	baseos
+
+bzip2-libs	aarch64	baseos
+
+ca-certificates	noarch	baseos
+
+coreutils-single	aarch64	baseos
+
+cracklib	aarch64	baseos
+
+cracklib-dicts	aarch64	baseos
+
+crypto-policies	noarch	baseos
+
+crypto-policies-scripts	noarch	baseos
+
+curl-minimal	aarch64	baseos
+
+cyrus-sasl-lib	aarch64	baseos
+
+dbus	aarch64	baseos
+
+dbus-broker	aarch64	baseos
+
+dbus-common	noarch	baseos
+
+dbus-libs	aarch64	baseos
+
+dnf	noarch	baseos
+
+dnf-data	noarch	baseos
+
+elfutils-debuginfod-client	aarch64	baseos
+
+elfutils-default-yama-scope	noarch	baseos
+
+elfutils-libelf	aarch64	baseos
+
+elfutils-libs	aarch64	baseos
+
+expat	aarch64	baseos
+
+file-libs	aarch64	baseos
+
+filesystem	aarch64	baseos
+
+findutils	aarch64	baseos
+
+gawk	aarch64	baseos
+
+gdbm-libs	aarch64	baseos
+
+glib2	aarch64	baseos
+
+glibc	aarch64	baseos
+
+glibc-common	aarch64	baseos
+
+glibc-minimal-langpack	aarch64	baseos
+
+gmp	aarch64	baseos
+
+gnupg2	aarch64	baseos
+
+gnutls	aarch64	baseos
+
+gpgme	aarch64	baseos
+
+grep	aarch64	baseos
+
+gzip	aarch64	baseos
+
+hostname	aarch64	baseos
+
+ima-evm-utils	aarch64	baseos
+
+iputils	aarch64	baseos
+
+json-c	aarch64	baseos
+
+keyutils	aarch64	baseos
+
+keyutils-libs	aarch64	baseos
+
+kmod-libs	aarch64	baseos
+
+krb5-libs	aarch64	baseos
+
+less	aarch64	baseos
+
+libacl	aarch64	baseos
+
+libarchive	aarch64	baseos
+
+libassuan	aarch64	baseos
+
+libattr	aarch64	baseos
+
+libblkid	aarch64	baseos
+
+libcap	aarch64	baseos
+
+libcap-ng	aarch64	baseos
+
+libcom_err	aarch64	baseos
+
+libcomps	aarch64	baseos
+
+libcurl-minimal	aarch64	baseos
+
+libdb	aarch64	baseos
+
+libdnf	aarch64	baseos
+
+libeconf	aarch64	baseos
+
+libevent	aarch64	baseos
+
+libfdisk	aarch64	baseos
+
+libffi	aarch64	baseos
+
+libgcc	aarch64	baseos
+
+libgcrypt	aarch64	baseos
+
+libgomp	aarch64	baseos
+
+libgpg-error	aarch64	baseos
+
+libidn2	aarch64	baseos
+
+libksba	aarch64	baseos
+
+libmodulemd	aarch64	baseos
+
+libmount	aarch64	baseos
+
+libnghttp2	aarch64	baseos
+
+libpwquality	aarch64	baseos
+
+librepo	aarch64	baseos
+
+libreport-filesystem	noarch	baseos
+
+libseccomp	aarch64	baseos
+
+libselinux	aarch64	baseos
+
+libsemanage	aarch64	baseos
+
+libsepol	aarch64	baseos
+
+libsigsegv	aarch64	baseos
+
+libsmartcols	aarch64	baseos
+
+libsolv	aarch64	baseos
+
+libstdc++	aarch64	baseos
+
+libtasn1	aarch64	baseos
+
+libtool-ltdl	aarch64	baseos
+
+libunistring	aarch64	baseos
+
+libutempter	aarch64	baseos
+
+libuuid	aarch64	baseos
+
+libverto	aarch64	baseos
+
+libxcrypt	aarch64	baseos
+
+libxml2	aarch64	baseos
+
+libyaml	aarch64	baseos
+
+libzstd	aarch64	baseos
+
+lua-libs	aarch64	baseos
+
+lz4-libs	aarch64	baseos
+
+mpfr	aarch64	baseos
+
+ncurses-base	noarch	baseos
+
+ncurses-libs	aarch64	baseos
+
+nettle	aarch64	baseos
+
+npth	aarch64	baseos
+
+openldap	aarch64	baseos
+
+openssl	aarch64	baseos
+
+openssl-fips-provider	aarch64	baseos
+
+openssl-libs	aarch64	baseos
+
+p11-kit	aarch64	baseos
+
+p11-kit-trust	aarch64	baseos
+
+pam	aarch64	baseos
+
+pcre	aarch64	baseos
+
+pcre2	aarch64	baseos
+
+pcre2-syntax	noarch	baseos
+
+popt	aarch64	baseos
+
+python3	aarch64	baseos
+
+python3-dateutil	noarch	baseos
+
+python3-dbus	aarch64	baseos
+
+python3-dnf	noarch	baseos
+
+python3-dnf-plugins-core	noarch	baseos
+
+python3-gpg	aarch64	baseos
+
+python3-hawkey	aarch64	baseos
+
+python3-libcomps	aarch64	baseos
+
+python3-libdnf	aarch64	baseos
+
+python3-libs	aarch64	baseos
+
+python3-pip-wheel	noarch	baseos
+
+python3-rpm	aarch64	baseos
+
+python3-setuptools-wheel	noarch	baseos
+
+python3-six	noarch	baseos
+
+python3-systemd	aarch64	baseos
+
+readline	aarch64	baseos
+
+rootfiles	noarch	baseos
+
+rpm	aarch64	baseos
+
+rpm-build-libs	aarch64	baseos
+
+rpm-libs	aarch64	baseos
+
+rpm-sign-libs	aarch64	baseos
+
+sed	aarch64	baseos
+
+setup	noarch	baseos
+
+shadow-utils	aarch64	baseos
+
+sqlite-libs	aarch64	baseos
+
+systemd	aarch64	baseos
+
+systemd-libs	aarch64	baseos
+
+systemd-pam	aarch64	baseos
+
+systemd-rpm-macros	noarch	baseos
+
+tar	aarch64	baseos
+
+tpm2-tss	aarch64	baseos
+
+tzdata	noarch	baseos
+
+util-linux	aarch64	baseos
+
+util-linux-core	aarch64	baseos
+
+vim-minimal	aarch64	baseos
+
+xz	aarch64	baseos
+
+xz-libs	aarch64	baseos
+
+yum	noarch	baseos
+
+zlib	aarch64	baseos
+
