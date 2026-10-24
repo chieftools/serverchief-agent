@@ -25,11 +25,6 @@ func NotifyStopping(status string) error {
 	return notify(buildState("STOPPING=1", status))
 }
 
-// NotifyStatus updates the free-form status shown by systemctl status.
-func NotifyStatus(status string) error {
-	return notify(buildState("", status))
-}
-
 func buildState(prefix string, status string) string {
 	parts := make([]string, 0, 2)
 	if prefix != "" {

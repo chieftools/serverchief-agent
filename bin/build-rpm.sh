@@ -57,7 +57,7 @@ if [ "${SKIP_BUILD:-0}" != 1 ]; then
 fi
 
 install -m 0755 "serverchief-linux-${GOARCH}" "${RPMBUILD_DIR}/SOURCES/serverchief"
-cp packaging/serverchief.service packaging/serverchief.init README.md "${RPMBUILD_DIR}/SOURCES/"
+cp packaging/serverchief.service packaging/serverchief.init README.md LICENSE "${RPMBUILD_DIR}/SOURCES/"
 
 # Scriptlets are inlined: %post -f would also work, but %preun and %postun
 # need the shared scripts too.
@@ -71,13 +71,13 @@ Version:        ${VERSION}
 Release:        ${RELEASE}
 Summary:        ${DESCRIPTION}
 
-# TODO(license): set once the license is chosen (likely Apache-2.0).
-License:        TBD
+License:        Apache-2.0
 URL:            ${URL}
 Packager:       ${MAINTAINER}
 Source0:        serverchief.service
 Source1:        serverchief.init
 Source2:        README.md
+Source3:        LICENSE
 
 %global debug_package %{nil}
 %global _build_id_links none
@@ -86,25 +86,29 @@ Source2:        README.md
 AutoReqProv:    no
 
 %description
-Collects read-only inventory facts (OS, hardware, network, resolvers) and
-reports changes to Server Chief. Supports systemd and SysV init.
+Inventories the operating system, hardware, network, packages, websites and
+certificates of this server and reports changes to Server Chief. Supports
+systemd and SysV init.
 
 %install
 mkdir -p %{buildroot}/usr/bin
 mkdir -p %{buildroot}/usr/lib/systemd/system
 mkdir -p %{buildroot}/etc/rc.d/init.d
 mkdir -p %{buildroot}/usr/share/doc/serverchief
+mkdir -p %{buildroot}/usr/share/licenses/serverchief
 
 install -m 0755 %{_sourcedir}/serverchief %{buildroot}/usr/bin/serverchief
 install -m 0644 %{SOURCE0} %{buildroot}/usr/lib/systemd/system/serverchief.service
 install -m 0755 %{SOURCE1} %{buildroot}/etc/rc.d/init.d/serverchief
 install -m 0644 %{SOURCE2} %{buildroot}/usr/share/doc/serverchief/README.md
+install -m 0644 %{SOURCE3} %{buildroot}/usr/share/licenses/serverchief/LICENSE
 
 %files
 %attr(0755, root, root) /usr/bin/serverchief
 %attr(0644, root, root) /usr/lib/systemd/system/serverchief.service
 %config(noreplace) %attr(0755, root, root) /etc/rc.d/init.d/serverchief
 %doc %attr(0644, root, root) /usr/share/doc/serverchief/README.md
+%license %attr(0644, root, root) /usr/share/licenses/serverchief/LICENSE
 
 %post
 ${POSTINSTALL}

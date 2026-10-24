@@ -57,7 +57,7 @@ install -m 0755 packaging/serverchief.init "${DEB_DIR}/etc/init.d/serverchief"
 # usrmerge-less Debian releases only read the former.
 install -m 0644 packaging/serverchief.service "${DEB_DIR}/lib/systemd/system/serverchief.service"
 install -m 0644 README.md "${DEB_DIR}/usr/share/doc/serverchief/README.md"
-# TODO(license): install LICENSE as usr/share/doc/serverchief/copyright once chosen.
+install -m 0644 LICENSE "${DEB_DIR}/usr/share/doc/serverchief/copyright"
 
 cat > "${DEB_DIR}/DEBIAN/control" << EOF2
 Package: ${PACKAGE_NAME}
@@ -69,8 +69,9 @@ Maintainer: ${MAINTAINER}
 Homepage: https://server.chief.app
 Recommends: ca-certificates
 Description: ${DESCRIPTION}
- Collects read-only inventory facts (OS, hardware, network, resolvers) and
- reports changes to Server Chief. Supports systemd and SysV init.
+ Inventories the operating system, hardware, network, packages, websites and
+ certificates of this server and reports changes to Server Chief. Supports
+ systemd and SysV init.
 EOF2
 
 cat > "${DEB_DIR}/DEBIAN/conffiles" << EOF2

@@ -1,6 +1,6 @@
 # Server Chief Agent
 
-The Server Chief Agent is a small, static Go binary that inventories a Linux server (operating system, hardware, network and DNS resolvers) and reports what changed to [Server Chief](https://server.chief.app/). Each dataset is hashed on its canonical JSON form, so the agent only uploads a dataset when its contents actually change.
+The Server Chief Agent is a small, static Go binary that inventories a Linux server (operating system, hardware, network, packages, websites and certificates) and reports what changed to [Server Chief](https://server.chief.app/). Each dataset is hashed on its canonical JSON form, so the agent only uploads a dataset when its contents actually change.
 
 The agent only makes outbound connections. It never listens on a port.
 
@@ -223,6 +223,7 @@ main.go          signal handling, embedded fallback CA roots
 cmd/             cobra CLI: version, collect, run, setup, internal-update (hidden)
 collector/       Collector interface, registry and the built-in collectors, plus the package system for the daemon's metadata refresh
 pkglock/         read-only package-manager lock inspection (F_GETLK, PID files)
+trust/           trusted roots: the system pool plus the embedded Mozilla bundle
 updater/         agent self-updates: capability, request/state/result files, the internal-update helper
 inventory/       canonical JSON, SHA-256 hashes, envelope, keyed-list deltas, state store
 agent/           protocol client, enrollment, daemon loop, settings, realtime glue
@@ -231,7 +232,7 @@ logging/         stdlib log setup and a size-capped rotating file writer
 systemdnotify/   sd_notify(3) for Type=notify
 pusher/          Pusher-protocol websocket client for realtime wake-ups
 packaging/       systemd unit, LSB init script, shared deb/rpm maintainer scripts
-bin/             build scripts
+bin/             build, packaging, repository and release scripts
 ```
 
 - **Host abstraction:** collectors read the host only through `collector.Host`, which holds an `fs.FS` rooted at `/` plus function fields for live-only sources (`uname`, `statfs`, `net.Interfaces`, DNS). Tests point it at fixtures under `collector/testdata/`. Some of those fixtures were copied verbatim from the official Docker images.
@@ -266,7 +267,9 @@ For end-to-end tests of agent updates in throwaway containers, `TEST_BUILD_TAGS`
 
 ## Releasing
 
-Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`: it builds the tarballs, `.deb` and `.rpm` packages, signs the RPMs and `SHA256SUMS` (`SHA256SUMS.asc`), adds the packages to the signed apt (`deb/`, suite `stable`, component `main`) and yum/dnf (`rpm/stable/<arch>/`) repositories, publishes them with `gpg.key` and `install.sh` over rsync, and creates the GitHub release from the version's `CHANGELOG.md` section. A manual run (`workflow_dispatch`) builds a version and publishes it only when `publish` is set; `rebuild_rpm_repo` regenerates the RPM metadata from every published RPM. The steps live in `bin/sign-packages.sh`, `bin/build-repo.sh` and `bin/generate-install-sh.sh`, so they also run locally.
+Add each change to the Unreleased section of `CHANGELOG.md` as it lands. To cut a release, run `bin/release.sh X.Y.Z` on a clean `main`: it moves the Unreleased entries under `## [X.Y.Z]`, adds the version to the links in the changelog footer, commits "Update changelog" and creates the signed `vX.Y.Z` tag on that commit. Review the result, then push it with `git push --atomic origin main vX.Y.Z`, or pass `--push` to do that right away.
+
+Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`: it builds the tarballs, `.deb` and `.rpm` packages, signs the RPMs and `SHA256SUMS` (`SHA256SUMS.asc`), adds the packages to the signed apt (`deb/`, suite `stable`, component `main`) and yum/dnf (`rpm/stable/<arch>/`) repositories, publishes them with `gpg.key` and `install.sh` over rsync, and creates the GitHub release from the version's `CHANGELOG.md` section. A manual run (`workflow_dispatch`) builds a version and publishes it only when `publish` is set; `rebuild_rpm_repo` regenerates the RPM metadata from every published RPM. Publishing stops with an error when the existing repository metadata cannot be downloaded, so a network or SSH failure never replaces the indexes with ones that lack the older versions; only paths that do not exist yet (the first release) are skipped. The steps live in `bin/sign-packages.sh`, `bin/build-repo.sh` and `bin/generate-install-sh.sh`, so they also run locally.
 
 Repository secrets:
 
@@ -287,4 +290,4 @@ The signing key is RSA 4096 (`Server Chief Team <hello@chief.app>`, no expiry): 
 
 ## License
 
-The license is still to be decided. It will likely be Apache-2.0, like the sibling Chief Tools agents.
+The Server Chief Agent is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for the license text.

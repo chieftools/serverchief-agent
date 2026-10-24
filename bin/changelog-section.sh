@@ -9,7 +9,7 @@ fi
 
 VERSION="${1#v}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHANGELOG_PATH="${CHANGELOG_PATH:-${SCRIPT_DIR}/../CHANGELOG.md}"
+CHANGELOG_PATH="${SCRIPT_DIR}/../CHANGELOG.md"
 
 awk -v heading="## [${VERSION}]" '
     $0 == heading {
@@ -22,6 +22,7 @@ awk -v heading="## [${VERSION}]" '
         capturing = 0
     }
 
+    # The link references in the footer end the oldest section.
     capturing && /^\[[^]]+\]: / {
         capturing = 0
     }

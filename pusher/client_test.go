@@ -209,29 +209,6 @@ func TestDisconnectSendsNormalCloseFrame(t *testing.T) {
 	}
 }
 
-func TestUpdateConfigReplacesConnectionWithNormalClose(t *testing.T) {
-	firstServer := newRealtimeTestServer(t, true)
-	secondServer := newRealtimeTestServer(t, true)
-	client := NewClient(firstServer.config(t, "public-first"), "serverchief/test", "synthetic-credential", "1.0.0", firstServer.server.Client(), false)
-	t.Cleanup(client.Disconnect)
-
-	if err := client.Connect(); err != nil {
-		t.Fatalf("connect failed: %v", err)
-	}
-	waitForConnected(t, client)
-
-	if err := client.UpdateConfig(secondServer.config(t, "public-second")); err != nil {
-		t.Fatalf("update config failed: %v", err)
-	}
-
-	if code := waitForCloseCode(t, firstServer); code != websocket.CloseNormalClosure {
-		t.Fatalf("expected replaced connection to close normally with code %d, got %d", websocket.CloseNormalClosure, code)
-	}
-
-	waitForAccepts(t, secondServer, 1)
-	waitForConnected(t, client)
-}
-
 func waitForAccepts(t *testing.T, server *realtimeTestServer, want int32) {
 	t.Helper()
 

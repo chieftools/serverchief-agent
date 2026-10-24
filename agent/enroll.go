@@ -456,7 +456,7 @@ func newCredential() (string, error) {
 	return CredentialPrefix + base64.RawURLEncoding.EncodeToString(value), nil
 }
 
-// newULID returns a ULID in Crockford base32 for now.
+// newULID returns a Crockford base32 ULID with the timestamp now.
 func newULID(now time.Time) (string, error) {
 	value := make([]byte, 16)
 	milliseconds := uint64(now.UTC().UnixMilli())
