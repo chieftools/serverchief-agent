@@ -1,0 +1,279 @@
+name: Build and Publish Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 1.0.0)'
+        required: true
+      publish:
+        description: 'Publish validated packages to the configured package server'
+        type: boolean
+        default: false
+      rebuild_rpm_repo:
+        description: 'Download all RPM files and rebuild repo metadata from scratch'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Get version
+        id: version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            VERSION="${REQUESTED_VERSION}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release version must use numeric X.Y.Z format."
+            exit 1
+          fi
+
+          printf 'RELEASE_VERSION=%s\n' "${VERSION}" >> "${GITHUB_ENV}"
+          printf 'VERSION=%s\n' "${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Building version: ${VERSION}"
+
+      - name: Install package build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Build packages
+        run: ./bin/build-all.sh "${RELEASE_VERSION}" 1
+
+      - name: Inspect release contents
+        run: |
+          # grep without -q reads all input, so pipefail sees no SIGPIPE
+          for ARCH in amd64 arm64; do
+            file "serverchief-linux-${ARCH}" | grep "statically linked"
+            dpkg-deb --contents "serverchief_${RELEASE_VERSION}_${ARCH}.deb" | grep '\./usr/bin/serverchief$'
+          done
+          for RPM_ARCH in x86_64 aarch64; do
+            rpm -qlp "serverchief-${RELEASE_VERSION}-1.${RPM_ARCH}.rpm" | grep -x /usr/bin/serverchief
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: |
+            serverchief_*.tar.gz
+            serverchief_*.deb
+            serverchief-*.rpm
+          retention-days: 30
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    concurrency: package-publication
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.build.outputs.version }}
+      PACKAGE_BASE_URL: ${{ vars.PACKAGE_BASE_URL }}
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_PATH: ${{ secrets.SSH_PATH }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      GPG_KEY_ID: ${{ vars.GPG_KEY_ID }}
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check release configuration
+        run: |
+          for INPUT in PACKAGE_BASE_URL SSH_HOST SSH_PATH SSH_PRIVATE_KEY GPG_KEY_ID GPG_PRIVATE_KEY GPG_PASSPHRASE; do
+            if [ -z "${!INPUT}" ]; then
+              echo "::error::Release blocked: missing ${INPUT}."
+              exit 1
+            fi
+          done
+
+          if [[ ! "${PACKAGE_BASE_URL}" =~ ^https://[a-zA-Z0-9.-]+$ ]]; then
+            echo "::error::PACKAGE_BASE_URL must be an HTTPS hostname without a trailing slash."
+            exit 1
+          fi
+
+          if [[ ! "${GPG_KEY_ID}" =~ ^[a-fA-F0-9]{40}$ ]]; then
+            echo "::error::GPG_KEY_ID must be the full 40-character signing fingerprint."
+            exit 1
+          fi
+
+          printf 'GNUPGHOME=%s\n' "${RUNNER_TEMP}/serverchief-signing" >> "${GITHUB_ENV}"
+          printf 'GPG_PASSPHRASE_FILE=%s\n' "${RUNNER_TEMP}/gpg-passphrase" >> "${GITHUB_ENV}"
+
+      - name: Download validated packages
+        uses: actions/download-artifact@v8
+        with:
+          name: packages
+
+      - name: Prepare release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_NOTES_PATH: ${{ runner.temp }}/release-notes.md
+        run: |
+          ./bin/changelog-section.sh "${RELEASE_VERSION}" > "${RELEASE_NOTES_PATH}"
+          printf '\n\n---\n\n%s\n' 'More information: [README](https://github.com/chieftools/serverchief-agent#readme) &middot; install with `curl -fsSL '"${PACKAGE_BASE_URL}"'/install.sh | sudo bash`, then run the setup command from Server Chief' >> "${RELEASE_NOTES_PATH}"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-utils createrepo-c rpm gpg rsync
+
+      - name: Import GPG key
+        run: |
+          mkdir -m 0700 "${GNUPGHOME}"
+          printf '%s\n' "${GPG_PRIVATE_KEY}" | gpg --batch --import
+          umask 077
+          printf '%s' "${GPG_PASSPHRASE}" > "${GPG_PASSPHRASE_FILE}"
+
+      - name: Verify signing identity and sign packages
+        run: |
+          CONFIGURED_FINGERPRINT="$(printf '%s' "${GPG_KEY_ID}" | tr '[:lower:]' '[:upper:]')"
+          IMPORTED_FINGERPRINT="$(gpg --batch --with-colons --fingerprint "${GPG_KEY_ID}" | awk -F: '$1 == "fpr" { print $10; exit }')"
+          SECRET_FINGERPRINT="$(gpg --batch --with-colons --list-secret-keys "${GPG_KEY_ID}" | awk -F: '$1 == "fpr" { print $10; exit }')"
+
+          if [ "${IMPORTED_FINGERPRINT}" != "${CONFIGURED_FINGERPRINT}" ] || \
+             [ "${SECRET_FINGERPRINT}" != "${CONFIGURED_FINGERPRINT}" ]; then
+            echo "::error::Imported signing key does not match GPG_KEY_ID."
+            exit 1
+          fi
+
+          # Signs the RPMs, then writes SHA256SUMS and SHA256SUMS.asc
+          ./bin/sign-packages.sh "${RELEASE_VERSION}" 1
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Download existing repository metadata
+        env:
+          REBUILD_RPM_REPO: ${{ inputs.rebuild_rpm_repo }}
+        run: |
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no"
+
+          # Download only DEB metadata (not the pool with all .deb archives)
+          mkdir -p repo-sync/deb/dists
+          rsync -avz -e "${SSH_CMD}" \
+            "${SSH_HOST}:${SSH_PATH}/deb/dists/" repo-sync/deb/dists/ || true
+
+          # Download RPM repositories
+          for RPM_ARCH in x86_64 aarch64; do
+            mkdir -p "repo-sync/rpm/stable/${RPM_ARCH}"
+            if [ "${REBUILD_RPM_REPO}" = "true" ]; then
+              echo "Rebuilding RPM ${RPM_ARCH} repo: downloading all packages..."
+              rsync -avz -e "${SSH_CMD}" \
+                "${SSH_HOST}:${SSH_PATH}/rpm/stable/${RPM_ARCH}/" \
+                "repo-sync/rpm/stable/${RPM_ARCH}/" || true
+            else
+              mkdir -p "repo-sync/rpm/stable/${RPM_ARCH}/repodata"
+              rsync -avz -e "${SSH_CMD}" \
+                "${SSH_HOST}:${SSH_PATH}/rpm/stable/${RPM_ARCH}/repodata/" \
+                "repo-sync/rpm/stable/${RPM_ARCH}/repodata/" || true
+            fi
+          done
+
+      - name: Update DEB and RPM repositories
+        env:
+          REBUILD_RPM_REPO: ${{ inputs.rebuild_rpm_repo }}
+        run: ./bin/build-repo.sh "${RELEASE_VERSION}" repo-sync 1
+
+      - name: Create repository configuration files
+        run: |
+          ./bin/generate-install-sh.sh "${PACKAGE_BASE_URL}" > repo-sync/install.sh
+          chmod +x repo-sync/install.sh
+          bash -n repo-sync/install.sh
+
+      - name: Upload to server
+        run: |
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no"
+
+          # Create the repository's directory tree first (directories only,
+          # nothing deleted): rsync does not create missing parent
+          # directories, which the first release would otherwise need
+          rsync -av --include='*/' --exclude='*' -e "${SSH_CMD}" \
+            repo-sync/ "${SSH_HOST}:${SSH_PATH}/"
+
+          # Upload new .deb to pool (additive only, old packages remain on server)
+          rsync -avz -e "${SSH_CMD}" \
+            repo-sync/deb/pool/ "${SSH_HOST}:${SSH_PATH}/deb/pool/"
+
+          # Upload updated DEB metadata
+          rsync -avz --delete -e "${SSH_CMD}" \
+            repo-sync/deb/dists/ "${SSH_HOST}:${SSH_PATH}/deb/dists/"
+
+          # Upload RPM packages and metadata for each architecture
+          for RPM_ARCH in x86_64 aarch64; do
+            # Upload new RPM package (additive only, old packages remain on server)
+            rsync -avz -e "${SSH_CMD}" \
+              "repo-sync/rpm/stable/${RPM_ARCH}/serverchief-${RELEASE_VERSION}-1.${RPM_ARCH}.rpm" \
+              "${SSH_HOST}:${SSH_PATH}/rpm/stable/${RPM_ARCH}/"
+
+            # Upload updated RPM metadata
+            rsync -avz --delete -e "${SSH_CMD}" \
+              "repo-sync/rpm/stable/${RPM_ARCH}/repodata/" \
+              "${SSH_HOST}:${SSH_PATH}/rpm/stable/${RPM_ARCH}/repodata/"
+          done
+
+          # Upload root config files
+          rsync -avz -e "${SSH_CMD}" \
+            repo-sync/install.sh repo-sync/gpg.key \
+            "${SSH_HOST}:${SSH_PATH}/"
+
+      - name: Clean up
+        if: always()
+        run: |
+          rm -f "${RUNNER_TEMP}/gpg-passphrase"
+          rm -f ~/.ssh/deploy_key
+          gpgconf --kill gpg-agent || true
+          rm -rf "${GNUPGHOME}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            serverchief_${{ env.RELEASE_VERSION }}_linux_amd64.tar.gz
+            serverchief_${{ env.RELEASE_VERSION }}_linux_arm64.tar.gz
+            serverchief_${{ env.RELEASE_VERSION }}_amd64.deb
+            serverchief_${{ env.RELEASE_VERSION }}_arm64.deb
+            serverchief-${{ env.RELEASE_VERSION }}-1.x86_64.rpm
+            serverchief-${{ env.RELEASE_VERSION }}-1.aarch64.rpm
+            SHA256SUMS
+            SHA256SUMS.asc
+          body_path: ${{ runner.temp }}/release-notes.md
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

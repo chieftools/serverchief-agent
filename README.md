@@ -264,6 +264,27 @@ docker run --rm -v "$PWD/serverchief-linux-arm64:/usr/bin/serverchief:ro" ubuntu
 
 For end-to-end tests of agent updates in throwaway containers, `TEST_BUILD_TAGS` adds test-only hooks to `bin/build.sh`: `serverchief_e2e_never_ready` (the daemon never writes its readiness marker, so an update to it rolls back) and `serverchief_e2e_short_lock_wait` (the helper gives up on a held lock after 30 s). Never set it for a release.
 
+## Releasing
+
+Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`: it builds the tarballs, `.deb` and `.rpm` packages, signs the RPMs and `SHA256SUMS` (`SHA256SUMS.asc`), adds the packages to the signed apt (`deb/`, suite `stable`, component `main`) and yum/dnf (`rpm/stable/<arch>/`) repositories, publishes them with `gpg.key` and `install.sh` over rsync, and creates the GitHub release from the version's `CHANGELOG.md` section. A manual run (`workflow_dispatch`) builds a version and publishes it only when `publish` is set; `rebuild_rpm_repo` regenerates the RPM metadata from every published RPM. The steps live in `bin/sign-packages.sh`, `bin/build-repo.sh` and `bin/generate-install-sh.sh`, so they also run locally.
+
+Repository secrets:
+
+- `SSH_HOST`: `user@host` of the package server
+- `SSH_PATH`: the package site's web root on that host
+- `SSH_PRIVATE_KEY`: the deploy key (only rsync is used)
+- `GPG_PRIVATE_KEY`: the ASCII-armored signing key
+- `GPG_PASSPHRASE`: its passphrase
+
+Repository variables:
+
+- `GPG_KEY_ID`: the signing key's full 40-character fingerprint
+- `PACKAGE_BASE_URL`: the HTTPS URL of the package site, without a trailing slash
+
+The signing key is RSA 4096 (`Server Chief Team <hello@chief.app>`, no expiry): CentOS 7's rpm and Ubuntu 14.04's gpgv cannot verify Ed25519 signatures.
+
+`install.sh` configures the repository under the names the updater checks (`/etc/apt/sources.list.d/serverchief.sources` with `Signed-By: /etc/apt/keyrings/serverchief.gpg`, `/etc/yum.repos.d/serverchief.repo` with `repo_gpgcheck=1`) and installs the package; it does not enroll the server. apt 1.0 (Ubuntu 14.04) gets `serverchief.list` and the key in `/etc/apt/trusted.gpg.d/` instead, and cannot self-update.
+
 ## License
 
 The license is still to be decided. It will likely be Apache-2.0, like the sibling Chief Tools agents.
