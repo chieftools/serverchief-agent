@@ -71,6 +71,9 @@ type VHostPHP struct {
 	Version *string `json:"version"`
 	// Handler is fpm, fastcgi, cgi, module or lsapi; null when unknown.
 	Handler *string `json:"handler"`
+	// weak marks a guess from php_value-style directives alone, which
+	// mod_php and mod_lsapi both accept; it is not sent.
+	weak bool
 }
 
 // VHostCertificate holds the public facts of a site's first certificate.
@@ -158,16 +161,21 @@ const (
 // A source that fails is logged and left out, and the dataset fails only
 // when every present source failed. A source that failed after an earlier
 // success keeps its previous items, so a briefly broken configuration (an
-// nginx -t failure during an edit) does not remove its sites from the
+// unreadable file during an edit) does not remove its sites from the
 // backend and add them back on the next run.
 type VHosts struct {
 	host *Host
 
 	mu   sync.Mutex
 	last map[string][]VHost
+	// warned holds each source's last logged warnings, so a lasting
+	// condition (a missing include) is logged once, not every run.
+	warned map[string]string
 }
 
-func NewVHosts(host *Host) *VHosts { return &VHosts{host: host, last: make(map[string][]VHost)} }
+func NewVHosts(host *Host) *VHosts {
+	return &VHosts{host: host, last: make(map[string][]VHost), warned: make(map[string]string)}
+}
 
 func (*VHosts) Name() string { return "vhosts" }
 
@@ -207,7 +215,7 @@ func (collector *VHosts) Collect(ctx context.Context) (any, error) {
 	collector.mu.Lock()
 	defer collector.mu.Unlock()
 
-	run := &vhostRun{host: collector.host, certificates: make(map[string]*VHostCertificate)}
+	run := &vhostRun{host: collector.host, certificates: make(map[string]*VHostCertificate), warnings: make(map[string][]string)}
 	info := &VHostsInfo{Items: []VHost{}}
 	var failures []string
 	present := 0
@@ -231,6 +239,12 @@ func (collector *VHosts) Collect(ctx context.Context) (any, error) {
 			}
 			continue
 		}
+		if warnings := strings.Join(run.warnings[source.name], "; "); warnings != collector.warned[source.name] {
+			if warnings != "" {
+				log.Printf("[collector] vhosts: %s: %s", source.name, warnings)
+			}
+			collector.warned[source.name] = warnings
+		}
 		items = mergeVHosts(source.name, items)
 		collector.last[source.name] = items
 		info.Items = append(info.Items, items...)
@@ -246,6 +260,25 @@ func (collector *VHosts) Collect(ctx context.Context) (any, error) {
 type vhostRun struct {
 	host         *Host
 	certificates map[string]*VHostCertificate
+	warnings     map[string][]string
+}
+
+// warn records a non-fatal problem of a source, logged when it changes.
+func (run *vhostRun) warn(source, message string) {
+	run.warnings[source] = append(run.warnings[source], message)
+}
+
+// addWWWAliases adds the www.<name> alias that Plesk and DirectAdmin
+// always serve, unless the name already starts with www. or is a wildcard.
+func addWWWAliases(items []VHost) []VHost {
+	for index := range items {
+		item := &items[index]
+		if item.Name == "" || strings.HasPrefix(item.Name, "www.") || strings.HasPrefix(item.Name, "*") {
+			continue
+		}
+		item.Aliases = append(slices.Clone(item.Aliases), "www."+item.Name)
+	}
+	return items
 }
 
 // mergeVHosts sets source on every item and folds items with the same name

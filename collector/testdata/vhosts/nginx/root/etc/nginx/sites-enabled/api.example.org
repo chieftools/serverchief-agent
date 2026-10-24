@@ -1,0 +1,13 @@
+server {
+	listen 8443 ssl;
+	listen 127.0.0.1:8080;
+	server_name API.Example.org "~^api-(?<region>[a-z]+)\.example\.org$";
+	ssl_certificate "/etc/nginx/ssl/api.example.org.pem";
+	ssl_certificate_key "/etc/nginx/ssl/api.example.org.key";
+
+	location / {
+		root /srv/api/public;
+		fastcgi_pass php82;
+		include fastcgi_params;
+	}
+}

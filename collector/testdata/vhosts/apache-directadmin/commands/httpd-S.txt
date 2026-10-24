@@ -1,0 +1,21 @@
+VirtualHost configuration:
+192.0.2.10:80          is a NameVirtualHost
+         default server www.alice.example (/usr/local/directadmin/data/users/alice/httpd.conf:4)
+         port 80 namevhost www.alice.example (/usr/local/directadmin/data/users/alice/httpd.conf:4)
+                 alias www.alice.example
+                 alias alice.example
+         port 80 namevhost www.blog.alice.example (/usr/local/directadmin/data/users/alice/httpd.conf:26)
+                 alias www.blog.alice.example
+                 alias blog.alice.example
+         port 80 namevhost www.carol.example (/usr/local/directadmin/data/users/carol/httpd.conf:1)
+                 alias www.carol.example
+                 alias carol.example
+ServerRoot: "/etc/httpd"
+Main DocumentRoot: "/var/www/html"
+Main ErrorLog: "/var/log/httpd/error_log"
+Mutex default: dir="/var/run/apache/" mechanism=default
+PidFile: "/var/run/httpd.pid"
+Define: DUMP_VHOSTS
+Define: DUMP_RUN_CFG
+User: name="apache" id=48 not_used
+Group: name="apache" id=48 not_used

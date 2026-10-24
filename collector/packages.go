@@ -32,6 +32,11 @@ type Package struct {
 	Arch    string `json:"arch"`
 	// Source is the source package, when it differs from Name.
 	Source string `json:"source,omitempty"`
+	// SourceVersion is the source package's version, when it differs from
+	// Version: dpkg's "Source: name (version)" (binNMUs, binaries with
+	// their own version), or rpm's SOURCERPM version-release with the
+	// binary's epoch.
+	SourceVersion string `json:"source_version,omitempty"`
 	// Versions lists every installed version, ascending, when more than
 	// one is installed under the same name and arch (rpm installonly
 	// packages such as kernel-core).
@@ -146,8 +151,12 @@ func parseDpkgStatus(data []byte) []Package {
 	flush := func() {
 		if dpkgInstalled(fields["Status"]) && fields["Package"] != "" {
 			item := Package{Name: fields["Package"], Version: fields["Version"], Arch: fields["Architecture"]}
-			if source, _, _ := strings.Cut(fields["Source"], " "); source != "" && source != item.Name {
+			source, version := parseDpkgSource(fields["Source"])
+			if source != "" && source != item.Name {
 				item.Source = source
+			}
+			if version != "" && version != item.Version {
+				item.SourceVersion = version
 			}
 			packages = append(packages, item)
 		}
@@ -174,6 +183,16 @@ func parseDpkgStatus(data []byte) []Package {
 	}
 	flush()
 	return packages
+}
+
+// parseDpkgSource splits a Source field, "name" or "name (version)".
+func parseDpkgSource(field string) (name, version string) {
+	name, rest, _ := strings.Cut(strings.TrimSpace(field), " ")
+	rest = strings.TrimSpace(rest)
+	if strings.HasPrefix(rest, "(") && strings.HasSuffix(rest, ")") {
+		version = strings.TrimSpace(rest[1 : len(rest)-1])
+	}
+	return name, version
 }
 
 // dpkgInstalled reports whether a Status field ("want flag status") says
@@ -209,8 +228,17 @@ func parseRPMQuery(data []byte) []Package {
 			Version: rpmEVR(parts[1], parts[2], parts[3]),
 			Arch:    rpmNone(parts[4]),
 		}
-		if source := rpmSourceName(rpmNone(parts[5])); source != "" && source != item.Name {
+		source, sourceVersion := rpmSource(rpmNone(parts[5]))
+		if source != "" && source != item.Name {
 			item.Source = source
+		}
+		if sourceVersion != "" {
+			if epoch := rpmNone(parts[1]); epoch != "" && epoch != "0" {
+				sourceVersion = epoch + ":" + sourceVersion
+			}
+			if sourceVersion != item.Version {
+				item.SourceVersion = sourceVersion
+			}
 		}
 		packages = append(packages, item)
 	}
@@ -224,32 +252,35 @@ func rpmNone(value string) string {
 	return value
 }
 
-// rpmEVR formats [epoch:]version-release.
+// rpmEVR formats [epoch:]version-release; an epoch of 0 is left out,
+// like an unset one.
 func rpmEVR(epoch, version, release string) string {
 	evr := version
 	if release = rpmNone(release); release != "" {
 		evr += "-" + release
 	}
-	if epoch = rpmNone(epoch); epoch != "" {
+	if epoch = rpmNone(epoch); epoch != "" && epoch != "0" {
 		evr = epoch + ":" + evr
 	}
 	return evr
 }
 
-// rpmSourceName turns "openssl-1.0.2k-26.el7_9.src.rpm" into "openssl".
-func rpmSourceName(sourceRPM string) string {
-	name := strings.TrimSuffix(strings.TrimSuffix(sourceRPM, ".src.rpm"), ".nosrc.rpm")
-	if name == sourceRPM {
-		return ""
+// rpmSource splits "openssl-3.0.7-27.el9.src.rpm" into "openssl" and
+// "3.0.7-27.el9".
+func rpmSource(sourceRPM string) (name, versionRelease string) {
+	base := strings.TrimSuffix(strings.TrimSuffix(sourceRPM, ".src.rpm"), ".nosrc.rpm")
+	if base == sourceRPM {
+		return "", ""
 	}
-	for range 2 {
-		index := strings.LastIndexByte(name, '-')
-		if index <= 0 {
-			return ""
-		}
-		name = name[:index]
+	release := strings.LastIndexByte(base, '-')
+	if release <= 0 {
+		return "", ""
 	}
-	return name
+	version := strings.LastIndexByte(base[:release], '-')
+	if version <= 0 || release == len(base)-1 || version == release-1 {
+		return "", ""
+	}
+	return base[:version], base[version+1:]
 }
 
 // collapsePackages merges packages installed more than once under the same
@@ -276,8 +307,12 @@ func collapsePackages(packages []Package, compare func(a, b string) int) []Packa
 		slices.SortFunc(versions, compare)
 		existing.Versions = versions
 		existing.Version = versions[len(versions)-1]
-		if compare(item.Version, existing.Version) >= 0 && item.Source != "" {
-			existing.Source = item.Source
+		// The source of the highest version describes the item.
+		if compare(item.Version, existing.Version) >= 0 {
+			if item.Source != "" {
+				existing.Source = item.Source
+			}
+			existing.SourceVersion = item.SourceVersion
 		}
 		if len(existing.Versions) == 1 {
 			existing.Versions = nil

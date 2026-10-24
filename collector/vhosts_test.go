@@ -12,8 +12,10 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io/fs"
 	"math/big"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -268,24 +270,184 @@ func TestVHostsApacheEL9(t *testing.T) {
 	})
 }
 
+func nginxHost(t *testing.T, ran *[]string, extra map[string][]byte) *Host {
+	t.Helper()
+	files := map[string][]byte{"usr/sbin/nginx": nil}
+	for name, data := range extra {
+		files[name] = data
+	}
+	return &Host{
+		FS:      vhostFixture(t, "nginx", files),
+		Command: vhostCommands(t, "nginx", []vhostCommand{{prefix: "nginx -V", file: "nginx-V.txt"}}, ran),
+	}
+}
+
+func TestVHostsApacheDirectAdminLSAPI(t *testing.T) {
+	newHost := func(t *testing.T, withGlobalHandler bool) *Host {
+		files := vhostFixture(t, "apache-directadmin", map[string][]byte{"usr/sbin/httpd": nil})
+		if !withGlobalHandler {
+			delete(files, "etc/httpd/conf/extra/httpd-php-handlers.conf")
+			delete(files, "etc/httpd/conf/extra/httpd-phpmodules.conf")
+		}
+		return &Host{FS: files, Command: vhostCommands(t, "apache-directadmin", []vhostCommand{{prefix: "httpd -S", file: "httpd-S.txt"}}, new([]string))}
+	}
+	// php_admin_value alone means PHP inside Apache: mod_lsapi here, from
+	// the server-wide handler or else from DirectAdmin's php1_mode, with
+	// the version from DirectAdmin's selection. An explicit FPM handler
+	// is kept as configured.
+	want := map[string]string{
+		"apache/www.alice.example":      `{"source":"apache","name":"www.alice.example","aliases":["alice.example"],"ports":[80],"ssl":false,"document_root":"/home/alice/domains/alice.example/public_html","php":{"version":"7.4","handler":"lsapi"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/alice/httpd.conf","owner":null}`,
+		"apache/www.blog.alice.example": `{"source":"apache","name":"www.blog.alice.example","aliases":["blog.alice.example"],"ports":[80],"ssl":false,"document_root":"/home/alice/domains/alice.example/public_html/blog","php":{"version":"7.4","handler":"lsapi"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/alice/httpd.conf","owner":null}`,
+		"apache/www.carol.example":      `{"source":"apache","name":"www.carol.example","aliases":["carol.example"],"ports":[80],"ssl":false,"document_root":"/home/carol/domains/carol.example/public_html","php":{"version":"8.2","handler":"fpm"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/carol/httpd.conf","owner":null}`,
+	}
+	t.Run("server-wide lsapi handler", func(t *testing.T) {
+		parser := &apacheParser{host: newHost(t, true), serverRoot: "/etc/httpd", files: map[string][]string{}}
+		if global := parser.globalPHP(); global == nil || *global.Handler != PHPHandlerLSAPI || global.Version != nil {
+			t.Fatalf("global = %+v", global)
+		}
+		checkVHosts(t, collectVHosts(t, NewVHosts(newHost(t, true))), want)
+	})
+	t.Run("DirectAdmin selection only", func(t *testing.T) {
+		checkVHosts(t, collectVHosts(t, NewVHosts(newHost(t, false))), want)
+	})
+}
+
+func TestApachePHPHintLSAPI(t *testing.T) {
+	cases := []struct {
+		line    string
+		handler string
+		version string
+		weak    bool
+	}{
+		{`AddHandler "application/x-httpd-lsphp" .php .php56`, PHPHandlerLSAPI, "", false},
+		{`AddHandler application/x-httpd-lsphp81 .php`, PHPHandlerLSAPI, "8.1", false},
+		{`<IfModule lsapi_module>`, PHPHandlerLSAPI, "", false},
+		{`<IfModule mod_lsapi.c>`, PHPHandlerLSAPI, "", false},
+		{`lsapi_phprc /home/alice/`, PHPHandlerLSAPI, "", false},
+		{`php_admin_value open_basedir /home/alice/`, PHPHandlerModule, "", true},
+		{`AddType application/x-httpd-php .php .php56`, "", "", false},
+		{`AddHandler application/x-httpd-php .php .php56`, PHPHandlerModule, "", false},
+	}
+	for _, test := range cases {
+		fields := apacheFields(test.line)
+		php := apachePHPHint(strings.ToLower(fields[0]), fields[1:])
+		if test.handler == "" {
+			if php != nil {
+				t.Errorf("%s = %+v", test.line, php)
+			}
+			continue
+		}
+		if php == nil || php.Handler == nil || *php.Handler != test.handler || (php.Version == nil) != (test.version == "") || php.Version != nil && *php.Version != test.version || php.weak != test.weak {
+			t.Errorf("%s = %+v", test.line, php)
+		}
+	}
+	if php := apachePHPHint("<ifmodule", []string{"!lsapi_module>"}); php != nil {
+		t.Errorf("<IfModule !lsapi_module> = %+v", php)
+	}
+}
+
 func TestVHostsNginx(t *testing.T) {
 	exampleCert, _ := testCertificate(t, "example.com", []string{"example.com", "www.example.com", "*.cdn.example.com"}, certificateExpiry)
 	apiCert, _ := testCertificate(t, "api.example.org", []string{"api.example.org"}, time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC))
 	var ran []string
-	host := &Host{
-		FS: vhostFixture(t, "nginx", map[string][]byte{
-			"usr/sbin/nginx": nil,
-			"etc/letsencrypt/live/example.com/fullchain.pem": exampleCert,
-			"etc/nginx/ssl/api.example.org.pem":              apiCert,
-		}),
-		Command: vhostCommands(t, "nginx", []vhostCommand{{prefix: "nginx -T", file: "nginx-T.txt"}}, &ran),
-	}
-	info := collectVHosts(t, NewVHosts(host))
+	host := nginxHost(t, &ran, map[string][]byte{
+		"etc/letsencrypt/live/example.com/fullchain.pem": exampleCert,
+		"etc/nginx/ssl/api.example.org.pem":              apiCert,
+	})
+	collector := NewVHosts(host)
+	info := collectVHosts(t, collector)
 	checkVHosts(t, info, map[string]string{
 		"nginx/api.example.org":    `{"source":"nginx","name":"api.example.org","aliases":["~^api-(?<region>[a-z]+)\\.example\\.org$"],"ports":[8080,8443],"ssl":true,"document_root":"/srv/api/public","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"api.example.org","issuer":"Test CA","not_after":"2026-12-01T00:00:00Z","names":["api.example.org"]},"config_file":"/etc/nginx/sites-enabled/api.example.org","owner":null}`,
 		"nginx/example.com":        `{"source":"nginx","name":"example.com","aliases":["*.cdn.example.com","www.example.com"],"ports":[80,443],"ssl":true,"document_root":"/var/www/example.com/public","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"example.com","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["*.cdn.example.com","example.com","www.example.com"]},"config_file":"/etc/nginx/sites-enabled/example.com","owner":null}`,
 		"nginx/legacy.example.net": `{"source":"nginx","name":"legacy.example.net","aliases":[],"ports":[80],"ssl":false,"document_root":"/srv/legacy","php":{"version":null,"handler":"fpm"},"certificate":null,"config_file":"/etc/nginx/sites-enabled/legacy","owner":null}`,
+		"nginx/multi.example.org":  `{"source":"nginx","name":"multi.example.org","aliases":["alias-one.example.org","alias-two.example.org"],"ports":[80,8080],"ssl":false,"document_root":"/usr/share/nginx/html","php":{"version":"8.3","handler":"fpm"},"certificate":null,"config_file":"/etc/nginx/conf.d/multi.example.org.conf","owner":null}`,
 	})
+	// nginx -V only prints build flags; nginx -t and -T test the
+	// configuration, which opens (and creates) every log file.
+	if !slices.Equal(ran, []string{"nginx -V"}) {
+		t.Fatalf("ran %v", ran)
+	}
+	if warning := collector.warned[VHostSourceNginx]; warning != "skipped 1 include(s) of missing files" {
+		t.Fatalf("warning = %q", warning)
+	}
+}
+
+func TestVHostsNginxWithoutBuildInfo(t *testing.T) {
+	// Without nginx -V (a mounted image, or a failing binary) the usual
+	// paths are tried and relative roots resolve against the conf dir.
+	host := nginxHost(t, new([]string), nil)
+	host.Command = nil
+	info := collectVHosts(t, NewVHosts(host))
+	if got := vhostsJSON(t, info)["nginx/multi.example.org"]; !strings.Contains(got, `"document_root":"/etc/nginx/html"`) {
+		t.Fatalf("multi.example.org = %s", got)
+	}
+	if countSource(info, VHostSourceNginx) != 4 {
+		t.Fatalf("items = %v", vhostsJSON(t, info))
+	}
+}
+
+func TestNginxIncludeBounds(t *testing.T) {
+	server := func(name string) string { return "server { server_name " + name + "; }\n" }
+	t.Run("depth", func(t *testing.T) {
+		fsys := fstest.MapFS{"etc/nginx/nginx.conf": {Data: []byte("http { include level1.conf; }\n")}}
+		for level := 1; level <= 12; level++ {
+			content := server(fmt.Sprintf("level%d.example", level)) + fmt.Sprintf("include level%d.conf;\n", level+1)
+			fsys[fmt.Sprintf("etc/nginx/level%d.conf", level)] = &fstest.MapFile{Data: []byte(content)}
+		}
+		config, loader, err := loadNginx(&Host{FS: fsys}, "/etc/nginx/nginx.conf", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		items := nginxVHosts(config, &vhostRun{host: &Host{FS: fsys}, certificates: map[string]*VHostCertificate{}})
+		if len(items) != nginxIncludeDepth || items[len(items)-1].Name != fmt.Sprintf("level%d.example", nginxIncludeDepth) || !loader.truncated {
+			t.Fatalf("%d items, truncated %v", len(items), loader.truncated)
+		}
+	})
+	t.Run("cycles and missing files", func(t *testing.T) {
+		fsys := fstest.MapFS{
+			"etc/nginx/nginx.conf": {Data: []byte("http { include a.conf; include missing.conf; include none.d/*.conf; include /etc/nginx; }\n")},
+			"etc/nginx/a.conf":     {Data: []byte(server("a.example") + "include b.conf;\n")},
+			"etc/nginx/b.conf":     {Data: []byte(server("b.example") + "include a.conf;\n")},
+		}
+		config, loader, err := loadNginx(&Host{FS: fsys}, "/etc/nginx/nginx.conf", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		items := nginxVHosts(config, &vhostRun{host: &Host{FS: fsys}, certificates: map[string]*VHostCertificate{}})
+		// A glob that matches nothing is fine for nginx too; a plain name
+		// (or a directory) that cannot be read is counted.
+		if len(items) != 2 || loader.missing != 2 || loader.truncated {
+			t.Fatalf("%d items, %d missing, truncated %v", len(items), loader.missing, loader.truncated)
+		}
+	})
+	t.Run("file count", func(t *testing.T) {
+		fsys := fstest.MapFS{"etc/nginx/nginx.conf": {Data: []byte("http { include sites/*; }\n")}}
+		for index := range nginxMaxFiles + 10 {
+			fsys[fmt.Sprintf("etc/nginx/sites/site%05d", index)] = &fstest.MapFile{Data: []byte(server(fmt.Sprintf("site%05d.example", index)))}
+		}
+		config, loader, err := loadNginx(&Host{FS: fsys}, "/etc/nginx/nginx.conf", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		items := nginxVHosts(config, &vhostRun{host: &Host{FS: fsys}, certificates: map[string]*VHostCertificate{}})
+		if len(items) != nginxMaxFiles-1 || !loader.truncated || loader.files != nginxMaxFiles {
+			t.Fatalf("%d items, %d files, truncated %v", len(items), loader.files, loader.truncated)
+		}
+	})
+}
+
+func TestParseNginxBuild(t *testing.T) {
+	cases := map[string]nginxBuild{
+		"configure arguments: --prefix=/usr/share/nginx --conf-path=/etc/nginx/nginx.conf": {prefix: "/usr/share/nginx", confPath: "/etc/nginx/nginx.conf"},
+		"configure arguments: --with-cc-opt='-O2 --prefix=/x' --prefix=/opt/nginx/":        {prefix: "/opt/nginx", confPath: "/opt/nginx/conf/nginx.conf"},
+		"configure arguments: --prefix=/opt/nginx --conf-path=conf/custom.conf":            {prefix: "/opt/nginx", confPath: "/opt/nginx/conf/custom.conf"},
+		"nginx version: nginx/1.10.3": {},
+	}
+	for output, want := range cases {
+		if got := parseNginxBuild([]byte(output)); got != want {
+			t.Errorf("parseNginxBuild(%q) = %+v, want %+v", output, got, want)
+		}
+	}
 }
 
 func pleskHost(t *testing.T, commands []vhostCommand, ran *[]string) *Host {
@@ -306,7 +468,9 @@ func TestVHostsPlesk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	domains = bytes.ReplaceAll(domains, []byte("@CERT_HEX@"), []byte(strings.ToUpper(hex.EncodeToString(certificate))))
+	// certificates.cert holds the PEM form-encoded; the query reads it as
+	// HEX(cert).
+	domains = bytes.ReplaceAll(domains, []byte("@CERT_HEX@"), []byte(strings.ToUpper(hex.EncodeToString([]byte(url.QueryEscape(string(certificate)))))))
 	var ran []string
 	host := pleskHost(t, []vhostCommand{
 		{prefix: "plesk db -Ne SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS", file: "columns.txt"},
@@ -315,24 +479,57 @@ func TestVHostsPlesk(t *testing.T) {
 	}, &ran)
 	info := collectVHosts(t, NewVHosts(host))
 	checkVHosts(t, info, map[string]string{
-		"plesk/customer.nl":           `{"source":"plesk","name":"customer.nl","aliases":["customer.be"],"ports":[80],"ssl":false,"document_root":"/var/www/vhosts/customer.nl/httpdocs","php":null,"certificate":null,"config_file":null,"owner":"customer.nl"}`,
-		"plesk/example.com":           `{"source":"plesk","name":"example.com","aliases":["example.net","www.example.net"],"ports":[80,443],"ssl":true,"document_root":"/var/www/vhosts/example.com/httpdocs","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"example.com","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["example.com","example.net","www.example.com"]},"config_file":"/var/www/vhosts/system/example.com/conf/httpd.conf","owner":"example.com"}`,
-		"plesk/shop.example.com":      `{"source":"plesk","name":"shop.example.com","aliases":[],"ports":[80],"ssl":false,"document_root":"/var/www/vhosts/example.com/shop.example.com","php":{"version":"7.4","handler":"fastcgi"},"certificate":null,"config_file":null,"owner":"example.com"}`,
-		"plesk/static.customer.nl":    `{"source":"plesk","name":"static.customer.nl","aliases":[],"ports":[80,443],"ssl":true,"document_root":"/var/www/vhosts/customer.nl/static","php":{"version":null,"handler":"fpm"},"certificate":null,"config_file":null,"owner":"customer.nl"}`,
-		"plesk/xn--bcher-kva.example": `{"source":"plesk","name":"xn--bcher-kva.example","aliases":[],"ports":[80],"ssl":false,"document_root":"/var/www/vhosts/xn--bcher-kva.example/httpdocs","php":{"version":"8.1","handler":"cgi"},"certificate":null,"config_file":null,"owner":"xn--bcher-kva.example"}`,
+		"plesk/customer.test":         `{"source":"plesk","name":"customer.test","aliases":["customer-alias.test","www.customer.test"],"ports":[80],"ssl":false,"document_root":"/var/www/vhosts/customer.test/httpdocs","php":null,"certificate":null,"config_file":null,"owner":"customer.test"}`,
+		"plesk/example.com":           `{"source":"plesk","name":"example.com","aliases":["example.net","www.example.com","www.example.net"],"ports":[80,443],"ssl":true,"document_root":"/var/www/vhosts/example.com/httpdocs","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"example.com","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["example.com","example.net","www.example.com"]},"config_file":"/var/www/vhosts/system/example.com/conf/httpd.conf","owner":"example.com"}`,
+		"plesk/shop.example.com":      `{"source":"plesk","name":"shop.example.com","aliases":["www.shop.example.com"],"ports":[80],"ssl":false,"document_root":"/var/www/vhosts/example.com/shop.example.com","php":{"version":"7.4","handler":"fastcgi"},"certificate":null,"config_file":null,"owner":"example.com"}`,
+		"plesk/static.customer.test":  `{"source":"plesk","name":"static.customer.test","aliases":["www.static.customer.test"],"ports":[80,443],"ssl":true,"document_root":"/var/www/vhosts/customer.test/static","php":{"version":null,"handler":"fpm"},"certificate":null,"config_file":null,"owner":"customer.test"}`,
+		"plesk/www.legacy.example":    `{"source":"plesk","name":"www.legacy.example","aliases":[],"ports":[80],"ssl":false,"document_root":"/var/www/vhosts/www.legacy.example/httpdocs","php":null,"certificate":null,"config_file":null,"owner":"www.legacy.example"}`,
+		"plesk/xn--bcher-kva.example": `{"source":"plesk","name":"xn--bcher-kva.example","aliases":["www.xn--bcher-kva.example"],"ports":[80],"ssl":false,"document_root":"/var/www/vhosts/xn--bcher-kva.example/httpdocs","php":{"version":"8.1","handler":"cgi"},"certificate":null,"config_file":null,"owner":"xn--bcher-kva.example"}`,
 	})
 	if len(ran) != 3 {
 		t.Fatalf("ran %v", ran)
 	}
 	for _, command := range ran {
 		upper := strings.ToUpper(command)
-		if strings.Contains(upper, "PVT_KEY") || strings.Contains(upper, "CSR") {
+		if strings.Contains(upper, "PVT_KEY") || strings.Contains(upper, "CSR") || strings.Contains(upper, "CERT_FILE") || strings.Contains(upper, "CA_FILE") {
 			t.Errorf("query selects a private column: %s", command)
 		}
 		for _, verb := range []string{"UPDATE ", "INSERT ", "DELETE ", "REPLACE ", "ALTER ", "DROP "} {
 			if strings.Contains(upper, verb) {
 				t.Errorf("query is not read-only: %s", command)
 			}
+		}
+	}
+}
+
+func TestPleskCertificate(t *testing.T) {
+	certificate, key := testCertificate(t, "example.com", []string{"example.com"}, certificateExpiry)
+	formEncoded := url.QueryEscape(string(certificate))
+	if !strings.HasPrefix(formEncoded, "-----BEGIN+CERTIFICATE-----%0A") {
+		t.Fatalf("fixture encoding = %.40s", formEncoded)
+	}
+	valid := map[string]string{
+		"hex of the form-encoded PEM":   hex.EncodeToString([]byte(formEncoded)),
+		"upper-case hex":                strings.ToUpper(hex.EncodeToString([]byte(formEncoded))),
+		"form-encoded PEM as text":      formEncoded,
+		"hex of a plain PEM":            hex.EncodeToString(certificate),
+		"plain PEM":                     string(certificate),
+		"form-encoded with %20 armor":   strings.ReplaceAll(formEncoded, "+", "%20"),
+		"form-encoded, trailing spaces": formEncoded + "\n",
+	}
+	for name, value := range valid {
+		if got := pleskCertificate(value); got == nil || got.Subject != "example.com" {
+			t.Errorf("%s: %+v", name, got)
+		}
+	}
+	for name, value := range map[string]string{
+		"empty":    "",
+		"not hex":  "zz",
+		"key only": hex.EncodeToString([]byte(url.QueryEscape(string(key)))),
+		"garbage":  hex.EncodeToString([]byte("-----BEGIN+CERTIFICATE-----%0Anope%0A-----END+CERTIFICATE-----%0A")),
+	} {
+		if got := pleskCertificate(value); got != nil {
+			t.Errorf("%s: %+v", name, got)
 		}
 	}
 }
@@ -366,39 +563,53 @@ func TestVHostsPleskFallsBackToSiteList(t *testing.T) {
 		{prefix: "plesk bin site --list", file: "site-list.txt"},
 	}, &ran)
 	info := collectVHosts(t, NewVHosts(host))
-	if len(info.Items) != 5 || info.Items[0].Name != "customer.nl" || info.Items[0].Owner != nil || len(info.Items[0].Ports) != 0 {
+	if len(info.Items) != 6 || info.Items[0].Name != "customer.test" || info.Items[0].Owner != nil || len(info.Items[0].Ports) != 0 ||
+		!slices.Equal(info.Items[0].Aliases, []string{"www.customer.test"}) || len(info.Items[4].Aliases) != 0 {
 		t.Fatalf("items = %v", vhostsJSON(t, info))
 	}
 }
 
 func TestVHostsDirectAdmin(t *testing.T) {
-	certificate, _ := testCertificate(t, "alice.example", []string{"alice.example", "www.alice.example", "blog.alice.example"}, certificateExpiry)
-	host := &Host{FS: vhostFixture(t, "directadmin", map[string][]byte{
+	certificate, key := testCertificate(t, "alice.example", []string{"alice.example", "www.alice.example", "blog.alice.example"}, certificateExpiry)
+	recorder := &openRecorder{FS: vhostFixture(t, "directadmin", map[string][]byte{
 		"usr/local/directadmin/data/users/alice/domains/alice.example.cert": certificate,
-		"usr/local/directadmin/data/users/alice/domains/alice.example.key":  []byte("not to be read"),
+		"usr/local/directadmin/data/users/alice/domains/alice.example.key":  key,
+		// .combined bundles the certificate with the chain, and may hold
+		// the key as well.
+		"usr/local/directadmin/data/users/alice/domains/alice.example.combined": append(append([]byte{}, key...), certificate...),
 	})}
+	host := &Host{FS: recorder}
 	info := collectVHosts(t, NewVHosts(host))
 	aliceCert := `{"subject":"alice.example","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["alice.example","blog.alice.example","www.alice.example"]}`
 	aliceConf := `"/usr/local/directadmin/data/users/alice/domains/alice.example.conf"`
 	checkVHosts(t, info, map[string]string{
-		"directadmin/alice.example":         `{"source":"directadmin","name":"alice.example","aliases":["alice.example.net"],"ports":[80,443],"ssl":true,"document_root":"/home/alice/domains/alice.example/public_html","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice"}`,
-		"directadmin/blog.alice.example":    `{"source":"directadmin","name":"blog.alice.example","aliases":[],"ports":[80,443],"ssl":true,"document_root":"/home/alice/domains/alice.example/public_html/blog","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice"}`,
-		"directadmin/staging.alice.example": `{"source":"directadmin","name":"staging.alice.example","aliases":[],"ports":[80,443],"ssl":true,"document_root":"/home/alice/domains/alice.example/public_html/staging","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice"}`,
-		"directadmin/shop.alice.example":    `{"source":"directadmin","name":"shop.alice.example","aliases":[],"ports":[80],"ssl":false,"document_root":"/home/alice/domains/shop.alice.example/public_html","php":null,"certificate":null,"config_file":"/usr/local/directadmin/data/users/alice/domains/shop.alice.example.conf","owner":"alice"}`,
-		"directadmin/bob.example":           `{"source":"directadmin","name":"bob.example","aliases":[],"ports":[80],"ssl":false,"document_root":"/srv/home/bob/domains/bob.example/public_html","php":{"version":"8.2","handler":"fpm"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/bob/domains/bob.example.conf","owner":"bob"}`,
+		"directadmin/alice.example":         `{"source":"directadmin","name":"alice.example","aliases":["alice.example.net","www.alice.example"],"ports":[80,443],"ssl":true,"document_root":"/home/alice/domains/alice.example/public_html","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice"}`,
+		"directadmin/blog.alice.example":    `{"source":"directadmin","name":"blog.alice.example","aliases":["www.blog.alice.example"],"ports":[80,443],"ssl":true,"document_root":"/home/alice/domains/alice.example/public_html/blog","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice"}`,
+		"directadmin/staging.alice.example": `{"source":"directadmin","name":"staging.alice.example","aliases":["www.staging.alice.example"],"ports":[80,443],"ssl":true,"document_root":"/home/alice/domains/alice.example/public_html/staging","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice"}`,
+		"directadmin/shop.alice.example":    `{"source":"directadmin","name":"shop.alice.example","aliases":["www.shop.alice.example"],"ports":[80],"ssl":false,"document_root":"/home/alice/domains/shop.alice.example/public_html","php":null,"certificate":null,"config_file":"/usr/local/directadmin/data/users/alice/domains/shop.alice.example.conf","owner":"alice"}`,
+		"directadmin/bob.example":           `{"source":"directadmin","name":"bob.example","aliases":["www.bob.example"],"ports":[80],"ssl":false,"document_root":"/srv/home/bob/domains/bob.example/public_html","php":{"version":"8.2","handler":"fpm"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/bob/domains/bob.example.conf","owner":"bob"}`,
 	})
+	for _, opened := range recorder.opened {
+		if strings.HasSuffix(opened, ".key") || strings.HasSuffix(opened, ".combined") {
+			t.Errorf("opened %s", opened)
+		}
+	}
 }
 
-// combinedHost has Apache (Debian fixture) and nginx; nginx answers with
-// nginxResult.
-func combinedHost(t *testing.T, nginx vhostCommand) *Host {
+// combinedHost has Apache (Debian fixture) and nginx, with the nginx
+// configuration tree when withNginxConfig is set.
+func combinedHost(t *testing.T, withNginxConfig bool) *Host {
 	t.Helper()
 	files := vhostFixture(t, "apache-debian", map[string][]byte{"usr/sbin/apache2ctl": nil, "usr/sbin/nginx": nil})
+	if withNginxConfig {
+		for name, file := range vhostFixture(t, "nginx", nil) {
+			files[name] = file
+		}
+	}
 	var ran []string
-	nginx.prefix = "nginx -T"
 	return &Host{FS: files, Command: vhostCommands(t, "nginx", []vhostCommand{
 		{prefix: "apache2ctl -S", data: mustRead(t, filepath.Join(vhostsTestdata, "apache-debian", "commands", "apache2ctl-S.txt"))},
-		nginx,
+		{prefix: "nginx -V", file: "nginx-V.txt"},
 	}, &ran)}
 }
 
@@ -423,7 +634,7 @@ func countSource(info *VHostsInfo, source string) int {
 
 func TestVHostsPartialFailure(t *testing.T) {
 	t.Run("one source fails", func(t *testing.T) {
-		host := combinedHost(t, vhostCommand{data: []byte("nginx: [emerg] unknown directive \"sever\" in /etc/nginx/sites-enabled/x:1\n"), exit: 1})
+		host := combinedHost(t, false)
 		info := collectVHosts(t, NewVHosts(host))
 		if countSource(info, VHostSourceApache) != 3 || countSource(info, VHostSourceNginx) != 0 {
 			t.Fatalf("items = %v", vhostsJSON(t, info))
@@ -431,24 +642,25 @@ func TestVHostsPartialFailure(t *testing.T) {
 	})
 
 	t.Run("every source fails", func(t *testing.T) {
-		host := combinedHost(t, vhostCommand{err: errors.New("exec: permission denied")})
+		host := combinedHost(t, false)
 		host.Command = func(_ context.Context, name string, args ...string) (CommandResult, error) {
 			return CommandResult{}, errors.New("exec: permission denied")
 		}
 		_, err := NewVHosts(host).Collect(context.Background())
-		if err == nil || !strings.Contains(err.Error(), "apache: apache2ctl -S: exec: permission denied") || !strings.Contains(err.Error(), "nginx: nginx -T: exec: permission denied") {
+		if err == nil || !strings.Contains(err.Error(), "apache: apache2ctl -S: exec: permission denied") || !strings.Contains(err.Error(), "nginx: no nginx configuration file found") {
 			t.Fatalf("error = %v", err)
 		}
 	})
 
 	t.Run("a failed source keeps its previous items", func(t *testing.T) {
-		host := combinedHost(t, vhostCommand{file: "nginx-T.txt"})
+		host := combinedHost(t, true)
 		collector := NewVHosts(host)
 		first := collectVHosts(t, collector)
-		if countSource(first, VHostSourceNginx) != 3 || countSource(first, VHostSourceApache) != 3 {
+		if countSource(first, VHostSourceNginx) != 4 || countSource(first, VHostSourceApache) != 3 {
 			t.Fatalf("first = %v", vhostsJSON(t, first))
 		}
-		broken := combinedHost(t, vhostCommand{data: []byte("nginx: [emerg] bad\n"), exit: 1})
+		broken := combinedHost(t, true)
+		broken.FS.(fstest.MapFS)["etc/nginx/nginx.conf"].Mode = fs.ModeDir
 		collector.host = broken
 		second := collectVHosts(t, collector)
 		if a, b := inventoryHash(t, first), inventoryHash(t, second); a != b {
@@ -574,7 +786,7 @@ ServerRoot: "/etc/apache2"
 }
 
 func TestVHostsDeltaKeyIsUnique(t *testing.T) {
-	host := combinedHost(t, vhostCommand{file: "nginx-T.txt"})
+	host := combinedHost(t, true)
 	info := collectVHosts(t, NewVHosts(host))
 	_, err := inventory.Diff(nil, info.Items, VHostKey)
 	if err != nil {

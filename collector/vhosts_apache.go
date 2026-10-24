@@ -186,15 +186,79 @@ func collectApache(ctx context.Context, run *vhostRun) ([]VHost, error) {
 	module := parser.moduleVersion()
 	for index := range items {
 		item := &items[index]
-		if item.PHP == nil && global != nil {
-			php := *global
-			item.PHP = &php
+		// php_admin_value and friends only say that PHP runs inside
+		// Apache, which is mod_php or mod_lsapi: the server-wide handler,
+		// or else DirectAdmin's selection, tells which.
+		switch {
+		case item.PHP == nil && global != nil, item.PHP != nil && item.PHP.weak && global != nil:
+			item.PHP = clonePHP(global)
+		case item.PHP != nil && item.PHP.weak:
+			if selected := parser.directAdminPHP(*item); selected != nil && selected.Handler != nil {
+				item.PHP = selected
+			}
 		}
-		if item.PHP != nil && item.PHP.Version == nil && item.PHP.Handler != nil && *item.PHP.Handler == PHPHandlerModule {
+		if item.PHP == nil {
+			continue
+		}
+		item.PHP = clonePHP(item.PHP)
+		item.PHP.weak = false
+		if item.PHP.Version == nil && item.PHP.Handler != nil && *item.PHP.Handler == PHPHandlerModule {
 			item.PHP.Version = module
+		}
+		if item.PHP.Version == nil && item.PHP.Handler != nil {
+			if selected := parser.directAdminPHP(*item); selected != nil && selected.Handler != nil && *selected.Handler == *item.PHP.Handler {
+				item.PHP.Version = selected.Version
+			}
 		}
 	}
 	return items, nil
+}
+
+func clonePHP(php *VHostPHP) *VHostPHP {
+	if php == nil {
+		return nil
+	}
+	clone := *php
+	return &clone
+}
+
+// directAdminPHP returns DirectAdmin's PHP selection for a virtual host
+// that DirectAdmin generated (an Include of data/users/<user>/httpd.conf):
+// the domain's php1_select, or its parent domain's for a subdomain,
+// resolved through custombuild/options.conf. It is nil elsewhere, for
+// sites with php=OFF, and without custombuild options.
+func (parser *apacheParser) directAdminPHP(item VHost) *VHostPHP {
+	if item.ConfigFile == nil {
+		return nil
+	}
+	rest, ok := strings.CutPrefix(*item.ConfigFile, directAdminUsers+"/")
+	user, _, _ := strings.Cut(rest, "/")
+	if !ok || user == "" || user == "." || user == ".." {
+		return nil
+	}
+	if parser.directAdminOptions == nil {
+		parser.directAdminOptions = map[string]string{}
+		if data, err := parser.host.readFile(directAdminOptions); err == nil {
+			parser.directAdminOptions = parseKeyValue(data)
+		}
+	}
+	if len(parser.directAdminOptions) == 0 {
+		return nil
+	}
+	config := map[string]string{}
+	for name := item.Name; strings.Contains(name, "."); name = name[strings.IndexByte(name, '.')+1:] {
+		if strings.ContainsAny(name, "/*") {
+			break
+		}
+		if data, err := parser.host.readFile(directAdminUsers + "/" + user + "/domains/" + name + ".conf"); err == nil {
+			config = parseKeyValue(data)
+			break
+		}
+	}
+	if strings.EqualFold(config["php"], "off") {
+		return nil
+	}
+	return directAdminPHP(config, parser.directAdminOptions)
 }
 
 // apacheBlock is what one <VirtualHost> block configures.
@@ -213,6 +277,8 @@ type apacheParser struct {
 	host       *Host
 	serverRoot string
 	files      map[string][]string
+	// directAdminOptions is custombuild/options.conf, read on first use.
+	directAdminOptions map[string]string
 }
 
 func (parser *apacheParser) lines(name string) []string {
@@ -328,23 +394,43 @@ func apachePHPHint(directive string, arguments []string) *VHostPHP {
 		case strings.Contains(lower, "fcgi://") || strings.Contains(lower, "proxy:unix:") && strings.Contains(lower, "php"):
 			return newPHP(phpVersionFrom(joined), PHPHandlerFPM)
 		case strings.Contains(lower, "x-httpd-lsphp"):
-			return newPHP(phpVersionFrom(joined), PHPHandlerLSAPI)
+			return newPHP(phpVersionFrom(apacheArgument(arguments, "x-httpd-lsphp")), PHPHandlerLSAPI)
 		case directive == "addhandler" && strings.Contains(lower, "fcgid-script"):
 			return newPHP(nil, PHPHandlerFastCGI)
 		case directive != "proxypass" && strings.Contains(lower, "application/x-httpd-php"):
-			return newPHP(phpVersionFrom(joined), PHPHandlerModule)
+			return newPHP(phpVersionFrom(apacheArgument(arguments, "application/x-httpd-php")), PHPHandlerModule)
 		}
 	case "fcgidwrapper":
 		if strings.Contains(lower, "php") {
 			return newPHP(phpVersionFrom(joined), PHPHandlerFastCGI)
 		}
 	case "php_admin_value", "php_admin_flag", "php_value", "php_flag":
-		return newPHP(nil, PHPHandlerModule)
+		php := newPHP(nil, PHPHandlerModule)
+		php.weak = true
+		return php
+	case "<ifmodule":
+		// <IfModule lsapi_module> or <IfModule mod_lsapi.c> around the
+		// site's lsapi_* settings.
+		if module := strings.TrimSuffix(lower, ">"); !strings.HasPrefix(module, "!") && strings.Contains(module, "lsapi") {
+			return newPHP(nil, PHPHandlerLSAPI)
+		}
 	}
 	if strings.HasPrefix(directive, "lsapi_") {
 		return newPHP(nil, PHPHandlerLSAPI)
 	}
 	return nil
+}
+
+// apacheArgument returns the first argument containing token, ignoring
+// case, or "". The handler names the PHP version (x-httpd-lsphp74); the
+// extension list after it (.php .php56) does not.
+func apacheArgument(arguments []string, token string) string {
+	for _, argument := range arguments {
+		if strings.Contains(strings.ToLower(argument), token) {
+			return argument
+		}
+	}
+	return ""
 }
 
 // phpRank prefers hints that name a version, then explicit handlers over
@@ -379,8 +465,54 @@ func (parser *apacheParser) globalPHP() *VHostPHP {
 			}
 		}
 	}
+	if php := parser.globalLSAPI(); php != nil {
+		return php
+	}
 	if parser.moduleLoaded() {
 		return newPHP(parser.moduleVersion(), PHPHandlerModule)
+	}
+	return nil
+}
+
+// apacheGlobalConfigs are the server-wide files searched for mod_lsapi:
+// DirectAdmin's conf/extra (httpd-php-handlers.conf, httpd-phpmodules.conf),
+// CloudLinux's conf.d/lsapi.conf, and the Debian and EL module
+// directories.
+var apacheGlobalConfigs = []string{
+	"conf/httpd.conf",
+	"conf/extra/*.conf",
+	"conf.d/*.conf",
+	"conf.modules.d/*.conf",
+	"mods-enabled/*.load",
+	"mods-enabled/*.conf",
+	"conf-enabled/*.conf",
+}
+
+// globalLSAPI detects mod_lsapi serving PHP server-wide: a handler mapping
+// to application/x-httpd-lsphp, or a loaded lsapi_module without mod_php.
+func (parser *apacheParser) globalLSAPI() *VHostPHP {
+	loaded := false
+	for _, pattern := range apacheGlobalConfigs {
+		for _, name := range parser.glob(parser.serverRoot + "/" + pattern) {
+			for _, line := range parser.lines(name) {
+				fields := apacheFields(strings.TrimSpace(line))
+				if len(fields) < 2 || strings.HasPrefix(fields[0], "#") {
+					continue
+				}
+				directive := strings.ToLower(fields[0])
+				switch {
+				case directive == "loadmodule" && strings.EqualFold(fields[1], "lsapi_module"):
+					loaded = true
+				case directive == "addhandler" || directive == "sethandler" || directive == "addtype":
+					if handler := apacheArgument(fields[1:], "x-httpd-lsphp"); handler != "" {
+						return newPHP(phpVersionFrom(handler), PHPHandlerLSAPI)
+					}
+				}
+			}
+		}
+	}
+	if loaded && !parser.moduleLoaded() {
+		return newPHP(nil, PHPHandlerLSAPI)
 	}
 	return nil
 }

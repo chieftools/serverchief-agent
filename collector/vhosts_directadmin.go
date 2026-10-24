@@ -30,6 +30,9 @@ var directAdminModes = map[string]string{
 //	data/users/<user>/domains/<domain>.cert       the public certificate
 //	custombuild/options.conf                       php2_release=8.2, php2_mode=php-fpm
 //
+// The domain's .key and .combined files are never read. Every domain and
+// subdomain also gets the www.<name> alias DirectAdmin always serves.
+//
 // Document roots follow DirectAdmin's fixed layout under the user's home
 // directory (from /etc/passwd, else /home/<user>).
 func collectDirectAdmin(_ context.Context, run *vhostRun) ([]VHost, error) {
@@ -67,7 +70,7 @@ func collectDirectAdmin(_ context.Context, run *vhostRun) ([]VHost, error) {
 			items = append(items, directAdminDomain(run, user, userDir, home, domain, options)...)
 		}
 	}
-	return items, nil
+	return addWWWAliases(items), nil
 }
 
 // directAdminDomain returns the items of one domain and its subdomains.
@@ -94,11 +97,9 @@ func directAdminDomain(run *vhostRun, user, userDir, home, domain string, option
 	item.DocumentRoot = &root
 	if item.SSL {
 		item.Ports = append(item.Ports, 443)
-		certificate := config["SSLCertificateFile"]
-		if certificate == "" && host.exists(base+".cert") {
-			certificate = base + ".cert"
-		}
-		item.Certificate = run.certificate(certificate)
+		// Only <domain>.cert is read: .key is the private key, and
+		// .combined may bundle the key with the chain.
+		item.Certificate = run.certificate(base + ".cert")
 	}
 	if !strings.EqualFold(config["php"], "off") {
 		item.PHP = directAdminPHP(config, options)

@@ -1,3 +1,3 @@
 1	example.net
 1	www.example.net
-3	customer.be
+3	customer-alias.test

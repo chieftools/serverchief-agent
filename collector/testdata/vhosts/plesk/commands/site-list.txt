@@ -1,5 +1,6 @@
 example.com
 shop.example.com
-customer.nl
-static.customer.nl
+customer.test
+static.customer.test
 xn--bcher-kva.example
+www.legacy.example

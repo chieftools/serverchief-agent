@@ -1,0 +1,15 @@
+server {
+	server_name legacy.example.net "";
+	location / {
+		root /srv/legacy;
+	}
+	location ~ \.php$ {
+		fastcgi_pass 127.0.0.1:9000;
+	}
+}
+
+server {
+	listen 80;
+	server_name "";
+	return 444;
+}

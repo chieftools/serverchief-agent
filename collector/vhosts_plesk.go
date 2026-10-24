@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -82,8 +83,9 @@ func unescapeMySQL(field string) string {
 
 // pleskDomainsQuery builds the domains query from the available columns.
 // Missing optional columns read as NULL. Only the public certificate
-// (certificates.cert, hex encoded so its line breaks survive the
-// tab-separated output) is selected, never the private key.
+// (certificates.cert, hex encoded so any line breaks survive the
+// tab-separated output) is selected, never the private key, and never
+// certificates.cert_file, whose file holds the key as well.
 func pleskDomainsQuery(columns pleskColumns) (string, error) {
 	for _, required := range [][2]string{{"domains", "id"}, {"domains", "name"}, {"hosting", "dom_id"}} {
 		if !columns.has(required[0], required[1]) {
@@ -205,17 +207,45 @@ func pleskFromDatabase(ctx context.Context, run *vhostRun) ([]VHost, error) {
 		if php != "false" {
 			item.PHP = pleskPHP(handler)
 		}
-		if certificate != "" {
-			if decoded, err := hex.DecodeString(certificate); err == nil {
-				item.Certificate = parseCertificatePEM(decoded)
-			}
-		}
+		item.Certificate = pleskCertificate(certificate)
 		if config := pleskVhostsSystem + "/" + name + "/conf/httpd.conf"; host.exists(config) {
 			item.ConfigFile = &config
 		}
 		items = append(items, item)
 	}
-	return items, nil
+	return addWWWAliases(items), nil
+}
+
+// pleskCertificate parses the certificates.cert value of the domains
+// query. Plesk stores the public PEM form-encoded, with "+" for spaces and
+// "%0A" for line breaks:
+//
+//	-----BEGIN+CERTIFICATE-----%0AMIIF…%0A-----END+CERTIFICATE-----%0A
+//
+// The query selects it as HEX(), but a plain value (from a query without
+// HEX, or a release that stores the PEM as is) is accepted too.
+func pleskCertificate(value string) *VHostCertificate {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if !strings.HasPrefix(value, "-----") {
+		decoded, err := hex.DecodeString(value)
+		if err != nil {
+			return nil
+		}
+		value = strings.TrimSpace(string(decoded))
+	}
+	// Base64 uses "+", so only a form-encoded value may be unescaped: its
+	// armor has "+" or "%20" for the space, and "%2B" for every "+".
+	if strings.HasPrefix(value, "-----BEGIN+") || strings.HasPrefix(value, "-----BEGIN%20") {
+		unescaped, err := url.QueryUnescape(value)
+		if err != nil {
+			return nil
+		}
+		value = unescaped
+	}
+	return parseCertificatePEM([]byte(value))
 }
 
 // pleskPHP maps a php_handler_id to a version and handler:
@@ -260,5 +290,5 @@ func pleskFromSiteList(ctx context.Context, host *Host) ([]VHost, error) {
 		}
 		items = append(items, VHost{Name: name})
 	}
-	return items, nil
+	return addWWWAliases(items), nil
 }
