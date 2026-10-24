@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Changed
+
+- Added the server ID to the agent's User-Agent once it is enrolled, as `serverchief-agent/<version> (linux; <arch>) server/<id>`, for both HTTP requests and the realtime connection. Logs and proxies in front of Server Chief can now tell which server sent a request.
+
 ## [0.1.0]
 
 ### Added

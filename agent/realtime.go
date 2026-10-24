@@ -30,7 +30,7 @@ type RealtimeAuthorizer func(ctx context.Context, socketID, channel string) (str
 type RealtimeConnector func(config Realtime, channel string, authorize RealtimeAuthorizer, onEvent func(event string)) (stop func())
 
 // PusherConnector returns a RealtimeConnector backed by the pusher client.
-func PusherConnector(version, credential string, tlsConfig *tls.Config) RealtimeConnector {
+func PusherConnector(version, serverID, credential string, tlsConfig *tls.Config) RealtimeConnector {
 	return func(config Realtime, channel string, authorize RealtimeAuthorizer, onEvent func(string)) func() {
 		pusherConfig := &pusher.Config{
 			Key:       config.Key,
@@ -46,7 +46,7 @@ func PusherConnector(version, credential string, tlsConfig *tls.Config) Realtime
 				pusherConfig.Port = 443
 			}
 		}
-		client := pusher.NewClient(pusherConfig, UserAgent(version), credential, ProtocolRevision, nil, false)
+		client := pusher.NewClient(pusherConfig, UserAgent(version, serverID), credential, ProtocolRevision, nil, false)
 		if client == nil {
 			return func() {}
 		}

@@ -54,7 +54,9 @@ type HTTPClient struct {
 	Endpoint   string
 	Credential string
 	Version    string
-	HTTP       *http.Client
+	// ServerID is added to the User-Agent once the server is enrolled.
+	ServerID string
+	HTTP     *http.Client
 }
 
 // NewClient returns a protocol client. credential may be empty for
@@ -71,14 +73,39 @@ func NewClient(endpoint, credential, version string, httpClient *http.Client) *H
 	}
 }
 
-// UserAgent is "serverchief-agent/<version> (linux; <arch>)".
-func (client *HTTPClient) UserAgent() string {
-	return UserAgent(client.Version)
+// WithServerID sets the enrolled server's ID for the User-Agent.
+func (client *HTTPClient) WithServerID(serverID string) *HTTPClient {
+	client.ServerID = serverID
+	return client
 }
 
-// UserAgent formats the agent's User-Agent header.
-func UserAgent(version string) string {
-	return fmt.Sprintf("serverchief-agent/%s (%s; %s)", normalizeVersion(version), runtime.GOOS, runtime.GOARCH)
+// UserAgent is "serverchief-agent/<version> (linux; <arch>)", followed by
+// " server/<id>" once enrolled.
+func (client *HTTPClient) UserAgent() string {
+	return UserAgent(client.Version, client.ServerID)
+}
+
+// UserAgent formats the agent's User-Agent header. The server ID identifies
+// the originating server in logs and proxies; it is left out when empty or
+// when it holds characters other than letters, digits, '-' and '_'.
+func UserAgent(version, serverID string) string {
+	userAgent := fmt.Sprintf("serverchief-agent/%s (%s; %s)", normalizeVersion(version), runtime.GOOS, runtime.GOARCH)
+	if validServerID(serverID) {
+		userAgent += " server/" + serverID
+	}
+	return userAgent
+}
+
+func validServerID(serverID string) bool {
+	if serverID == "" || len(serverID) > 64 {
+		return false
+	}
+	for _, character := range serverID {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') && character != '-' && character != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeVersion(version string) string {

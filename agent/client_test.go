@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -407,5 +408,40 @@ func TestAuthorizeChannelKeepsCredentialOnEndpointOrigin(t *testing.T) {
 	}
 	if !reflect.DeepEqual(hits, []string{"/agent/v1/broadcasting/auth", "/agent/v1/broadcasting/auth"}) {
 		t.Fatalf("auth requests went to %v", hits)
+	}
+}
+
+func TestUserAgentIncludesTheEnrolledServerID(t *testing.T) {
+	platform := " (" + runtime.GOOS + "; " + runtime.GOARCH + ")"
+	for _, test := range []struct {
+		name, serverID, want string
+	}{
+		{"before enrollment", "", "serverchief-agent/1.2.3" + platform},
+		{"enrolled", "01jb8z5k2m3n4p5q6r7s8t9v0w", "serverchief-agent/1.2.3" + platform + " server/01jb8z5k2m3n4p5q6r7s8t9v0w"},
+		{"unsafe characters", "01jb8z5k/../x y", "serverchief-agent/1.2.3" + platform},
+		{"too long", strings.Repeat("a", 65), "serverchief-agent/1.2.3" + platform},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := UserAgent("v1.2.3", test.serverID); got != test.want {
+				t.Fatalf("UserAgent() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestClientSendsTheServerIDInItsUserAgent(t *testing.T) {
+	var userAgent string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		userAgent = request.Header.Get("User-Agent")
+		writeJSONResponse(writer, 200, `{"resync":[],"config_etag":"\"c1\"","commands_available":false}`)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL+"/agent/v1", "scagt_secret", "1.2.3", server.Client()).WithServerID("01jb8z5k2m3n4p5q6r7s8t9v0w")
+	if _, err := client.Heartbeat(context.Background(), HeartbeatRequest{AgentVersion: "1.2.3"}); err != nil {
+		t.Fatalf("Heartbeat() error = %v", err)
+	}
+	if want := UserAgent("1.2.3", "01jb8z5k2m3n4p5q6r7s8t9v0w"); userAgent != want || !strings.HasSuffix(userAgent, " server/01jb8z5k2m3n4p5q6r7s8t9v0w") {
+		t.Fatalf("User-Agent = %q, want %q", userAgent, want)
 	}
 }
