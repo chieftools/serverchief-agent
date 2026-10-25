@@ -91,7 +91,7 @@ Running setup with a new token on an enrolled server re-enrolls it: the request 
 ### Run the daemon
 
 ```bash
-sudo serverchief run                                          # systemd: logs to the journal
+systemctl status serverchief                                  # systemd: runs as the serverchief user, logs to the journal
 sudo serverchief run --log-file /var/log/serverchief/agent.log  # SysV: size-capped file log
 serverchief run --config ./config.json --state-dir ./state      # development run with local state
 ```
@@ -118,6 +118,16 @@ Every key in `/etc/serverchief/config.json` is optional. These operator override
 ```
 
 State lives in `/var/lib/serverchief`: `state.json` (seq, acknowledged seq and hashes, last reported errors), `server-config.json` (the backend configuration with its ETag), `payloads/` (delta bases), `metadata-refresh.json` (the last successful package metadata refresh) `commands.json` (recent commands with their state and result, kept 48 hours after their result was reported) and, while an agent update runs, `update-request.json`, `update-state.json`, `update-ready.json` and `update-result.json` (see *Agent updates*). Every file is mode 0600 and replaced atomically (temporary file, fsync, rename).
+
+### Privileges
+
+The packaged daemon runs as the `serverchief` system user, not as root. `serverchief.service` grants it only `CAP_DAC_READ_SEARCH`, so it can read package databases, web server and panel configuration and certificates, but cannot write anything outside `/var/lib/serverchief` and `/var/log/serverchief` (`ProtectSystem=strict`, `NoNewPrivileges`). `identity.json` is `root:serverchief 0640`.
+
+The few things that need root go through the root helper: the daemon writes a request to `/var/lib/serverchief/helper/`, `serverchief-helper.path` starts `serverchief-helper.service` (`serverchief internal-helper`, root, oneshot), and the helper writes the result back. It knows a fixed list of actions without arguments: `ping`, `refresh-metadata` (the package metadata refresh), `plesk-sites` (reads the Plesk sites; the helper builds the queries) and `start-agent-update`. It opens requests without following symbolic links, only accepts small files of the directory's owner and creates results as new files.
+
+Where systemd cannot grant ambient capabilities (before 229, such as CentOS 7) the package installs `/etc/systemd/system/serverchief.service` from `/usr/share/serverchief/serverchief-root.service`, and under SysV the init script runs the daemon as root: it then runs the same actions in-process. An update from a version that ran as root (before 0.2.0) finishes as root and then switches to the `serverchief` user on its own (`serverchief internal-unprivilege`). Every heartbeat reports the mode and the available helper actions, and the backend records a change of mode.
+
+Because the daemon can read every file, a symbolic link inside a hosting user's tree is only followed when it stays inside that tree, and files are read up to a size cap.
 
 ### Agent updates
 

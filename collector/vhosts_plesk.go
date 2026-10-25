@@ -3,9 +3,12 @@ package collector
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
+
+	"go.chief.tools/serverchief-agent/helper"
 )
 
 const (
@@ -140,26 +143,85 @@ func pleskAliasesQuery(columns pleskColumns) string {
 	return query + " ORDER BY dom_id, name"
 }
 
-func collectPlesk(ctx context.Context, run *vhostRun) ([]VHost, error) {
-	items, err := pleskFromDatabase(ctx, run)
-	if err == nil {
-		return items, nil
-	}
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	fallback, fallbackErr := pleskFromSiteList(ctx, run.host)
-	if fallbackErr != nil {
-		return nil, fmt.Errorf("plesk db: %v; plesk bin site --list: %v", err, fallbackErr)
-	}
-	return fallback, nil
+// PleskSites is what collecting Plesk sites needs from root-only tools:
+// the psa database rows, or the site names from `plesk bin site --list`
+// when the database cannot be queried. The root helper returns it to the
+// unprivileged daemon (helper.ActionPleskSites).
+type PleskSites struct {
+	// Domains holds the rows of pleskDomainsQuery, Aliases those of
+	// pleskAliasesQuery. Both are nil when the database failed.
+	Domains [][]string `json:"domains,omitempty"`
+	Aliases [][]string `json:"aliases,omitempty"`
+	// SiteList holds the names of the fallback, DatabaseError why the
+	// database failed.
+	SiteList      []string `json:"site_list,omitempty"`
+	DatabaseError string   `json:"database_error,omitempty"`
+	SiteListError string   `json:"site_list_error,omitempty"`
 }
 
-func pleskFromDatabase(ctx context.Context, run *vhostRun) ([]VHost, error) {
-	host := run.host
-	rows, err := host.pleskQuery(ctx, pleskColumnsQuery)
+// FetchPleskSites runs the read-only psa queries, built here from the
+// detected schema, falling back to the site list. It needs root.
+func (host *Host) FetchPleskSites(ctx context.Context) PleskSites {
+	domains, aliases, err := host.pleskDatabaseRows(ctx)
+	if err == nil {
+		return PleskSites{Domains: domains, Aliases: aliases}
+	}
+	sites := PleskSites{DatabaseError: err.Error()}
+	if ctx.Err() != nil {
+		sites.SiteListError = ctx.Err().Error()
+		return sites
+	}
+	names, err := host.pleskSiteList(ctx)
+	if err != nil {
+		sites.SiteListError = err.Error()
+		return sites
+	}
+	sites.SiteList = names
+	return sites
+}
+
+// pleskSites fetches the Plesk sites through the root helper when the
+// daemon runs unprivileged, directly otherwise.
+func (host *Host) pleskSites(ctx context.Context) (PleskSites, error) {
+	if host.Privileged == nil {
+		return host.FetchPleskSites(ctx), nil
+	}
+	result, err := host.Privileged.Do(ctx, helper.ActionPleskSites, nil)
+	if err != nil {
+		return PleskSites{}, err
+	}
+	var sites PleskSites
+	if err := json.Unmarshal(result.Data, &sites); err != nil {
+		return PleskSites{}, fmt.Errorf("read the Plesk sites from the helper: %w", err)
+	}
+	return sites, nil
+}
+
+func collectPlesk(ctx context.Context, run *vhostRun) ([]VHost, error) {
+	sites, err := run.host.pleskSites(ctx)
 	if err != nil {
 		return nil, err
+	}
+	switch {
+	case sites.DatabaseError == "":
+		return pleskFromRows(run, sites.Domains, sites.Aliases), nil
+	case sites.SiteListError == "":
+		items := make([]VHost, 0, len(sites.SiteList))
+		for _, name := range sites.SiteList {
+			items = append(items, VHost{Name: name})
+		}
+		return addWWWAliases(items), nil
+	default:
+		return nil, fmt.Errorf("plesk db: %s; plesk bin site --list: %s", sites.DatabaseError, sites.SiteListError)
+	}
+}
+
+// pleskDatabaseRows detects the schema and returns the domain and alias
+// rows.
+func (host *Host) pleskDatabaseRows(ctx context.Context) ([][]string, [][]string, error) {
+	rows, err := host.pleskQuery(ctx, pleskColumnsQuery)
+	if err != nil {
+		return nil, nil, err
 	}
 	columns := pleskColumns{}
 	for _, row := range rows {
@@ -174,22 +236,29 @@ func pleskFromDatabase(ctx context.Context, run *vhostRun) ([]VHost, error) {
 	}
 	query, err := pleskDomainsQuery(columns)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	rows, err = host.pleskQuery(ctx, query)
+	domains, err := host.pleskQuery(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	aliases := map[string][]string{}
+	aliases := [][]string{}
 	if aliasQuery := pleskAliasesQuery(columns); aliasQuery != "" {
-		aliasRows, err := host.pleskQuery(ctx, aliasQuery)
-		if err != nil {
-			return nil, err
+		if aliases, err = host.pleskQuery(ctx, aliasQuery); err != nil {
+			return nil, nil, err
 		}
-		for _, row := range aliasRows {
-			if len(row) == 2 && row[1] != "" {
-				aliases[row[0]] = append(aliases[row[0]], strings.ToLower(row[1]))
-			}
+	}
+	if domains == nil {
+		domains = [][]string{}
+	}
+	return domains, aliases, nil
+}
+
+func pleskFromRows(run *vhostRun, rows, aliasRows [][]string) []VHost {
+	aliases := map[string][]string{}
+	for _, row := range aliasRows {
+		if len(row) == 2 && row[1] != "" {
+			aliases[row[0]] = append(aliases[row[0]], strings.ToLower(row[1]))
 		}
 	}
 
@@ -215,12 +284,12 @@ func pleskFromDatabase(ctx context.Context, run *vhostRun) ([]VHost, error) {
 			item.PHP = pleskPHP(handler)
 		}
 		item.Certificate = pleskCertificate(certificate, certificateChain, certificateName)
-		if config := pleskVhostsSystem + "/" + name + "/conf/httpd.conf"; host.exists(config) {
+		if config := pleskVhostsSystem + "/" + name + "/conf/httpd.conf"; run.host.exists(config) {
 			item.ConfigFile = &config
 		}
 		items = append(items, item)
 	}
-	return addWWWAliases(items), nil
+	return addWWWAliases(items)
 }
 
 // pleskCertificate parses the certificates.cert value of the domains
@@ -307,9 +376,9 @@ func pleskPHP(id string) *VHostPHP {
 	return newPHP(phpVersionFrom(lower), handler)
 }
 
-// pleskFromSiteList is the fallback when the database cannot be queried:
+// pleskSiteList is the fallback when the database cannot be queried:
 // names only.
-func pleskFromSiteList(ctx context.Context, host *Host) ([]VHost, error) {
+func (host *Host) pleskSiteList(ctx context.Context) ([]string, error) {
 	result, err := host.run(ctx, host.findCommand("plesk"), "bin", "site", "--list")
 	if err != nil {
 		return nil, err
@@ -317,13 +386,13 @@ func pleskFromSiteList(ctx context.Context, host *Host) ([]VHost, error) {
 	if result.ExitCode != 0 {
 		return nil, fmt.Errorf("exited with status %d: %s", result.ExitCode, firstLine(result.Stderr))
 	}
-	var items []VHost
+	names := []string{}
 	for _, line := range lines(result.Stdout) {
 		name := strings.ToLower(strings.TrimSpace(line))
 		if name == "" || strings.ContainsAny(name, " \t") {
 			continue
 		}
-		items = append(items, VHost{Name: name})
+		names = append(names, name)
 	}
-	return addWWWAliases(items), nil
+	return names, nil
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"syscall"
 	"time"
 
 	"go.chief.tools/serverchief-agent/inventory"
@@ -126,13 +127,23 @@ type state struct {
 // Store reads and writes the updater's files in one directory.
 type Store struct {
 	Directory string
-	// Owner is the UID every file must belong to; -1 skips the check
-	// (tests). The packaged agent runs as root.
+	// Owner is the UID every file must belong to, the owner of Directory:
+	// the serverchief user, or root where the daemon runs as root. Files
+	// root writes are handed to it. -1 skips the check (tests).
 	Owner int
 }
 
-// NewStore returns the store of the packaged agent.
-func NewStore() Store { return Store{Directory: DefaultDirectory, Owner: 0} }
+// NewStore returns the store of the packaged agent, for the root update
+// helper.
+func NewStore() Store {
+	owner := 0
+	if info, err := os.Lstat(DefaultDirectory); err == nil && info.IsDir() {
+		if uid, ok := fileOwner(info); ok {
+			owner = uid
+		}
+	}
+	return Store{Directory: DefaultDirectory, Owner: owner}
+}
 
 func (store Store) path(name string) string { return filepath.Join(store.Directory, name) }
 
@@ -243,11 +254,15 @@ func (store Store) read(name string, target any) (bool, error) {
 			return false, fmt.Errorf("%s is owned by uid %d", path, uid)
 		}
 	}
-	file, err := os.Open(path)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return false, err
 	}
 	defer file.Close()
+	// The file seen by Lstat must be the file opened
+	if opened, err := file.Stat(); err != nil || !os.SameFile(info, opened) {
+		return false, fmt.Errorf("%s changed while it was read", path)
+	}
 	data, err := io.ReadAll(io.LimitReader(file, maximumFileBytes+1))
 	if err != nil {
 		return false, err
@@ -268,7 +283,15 @@ func (store Store) write(name string, value any) error {
 	if err != nil {
 		return err
 	}
-	return inventory.WriteFileAtomic(store.path(name), append(data, '\n'), 0o600)
+	if err := inventory.WriteFileAtomic(store.path(name), append(data, '\n'), 0o600); err != nil {
+		return err
+	}
+	// Root hands its files to the unprivileged daemon that reads them;
+	// Lchown never follows a link that replaced the file meanwhile.
+	if os.Geteuid() == 0 && store.Owner > 0 {
+		return os.Lchown(store.path(name), store.Owner, -1)
+	}
+	return nil
 }
 
 func (store Store) remove(name string) error {

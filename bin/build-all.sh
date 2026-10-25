@@ -33,6 +33,9 @@ for ARCH in amd64 arm64; do
     mkdir -p "${STAGING}/${NAME}"
     install -m 0755 "serverchief-linux-${ARCH}" "${STAGING}/${NAME}/serverchief"
     install -m 0644 packaging/serverchief.service "${STAGING}/${NAME}/serverchief.service"
+    install -m 0644 packaging/serverchief-helper.service "${STAGING}/${NAME}/serverchief-helper.service"
+    install -m 0644 packaging/serverchief-helper.path "${STAGING}/${NAME}/serverchief-helper.path"
+    install -m 0644 packaging/serverchief-root.service "${STAGING}/${NAME}/serverchief-root.service"
     install -m 0755 packaging/serverchief.init "${STAGING}/${NAME}/serverchief.init"
     install -m 0644 README.md "${STAGING}/${NAME}/README.md"
     # Reproducible tarballs: fixed owner, order and timestamps.

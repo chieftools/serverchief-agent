@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for Server Chief agent requests that need root
+Documentation=https://server.chief.app
+
+[Path]
+PathExistsGlob=/var/lib/serverchief/helper/*.request.json
+Unit=serverchief-helper.service
+
+[Install]
+WantedBy=multi-user.target

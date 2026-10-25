@@ -247,7 +247,7 @@ func TestHTTPClientEndpointsAndHeaders(t *testing.T) {
 		t.Fatalf("%d requests", len(*requests))
 	}
 	for _, request := range *requests {
-		if request.header.Get(ProtocolHeader) != "1.0.0" {
+		if request.header.Get(ProtocolHeader) != "1.1.0" {
 			t.Errorf("%s: protocol header %q", request.path, request.header.Get(ProtocolHeader))
 		}
 		if userAgent := request.header.Get("User-Agent"); !strings.HasPrefix(userAgent, "serverchief-agent/1.2.3 (") || !strings.HasSuffix(userAgent, ")") {

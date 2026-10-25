@@ -11,7 +11,7 @@ import (
 
 const (
 	// ProtocolRevision is the agent ↔ backend protocol this build speaks.
-	ProtocolRevision = "1.0.0"
+	ProtocolRevision = "1.1.0"
 	// ProtocolHeader carries ProtocolRevision on every request.
 	ProtocolHeader = "ServerChief-Protocol-Revision"
 	// DefaultEndpoint is the production agent API.
@@ -56,6 +56,10 @@ type Paths struct {
 	// Log is the file log used on hosts without journald.
 	Log string
 }
+
+// AgentGroup is the group of the unprivileged daemon's user, which may read
+// the identity setup writes.
+const AgentGroup = "serverchief"
 
 // DefaultPaths returns the packaged locations.
 func DefaultPaths() Paths {
@@ -211,6 +215,8 @@ type HeartbeatRequest struct {
 // Capabilities are what this agent can do beyond the inventory.
 type Capabilities struct {
 	AgentUpdate AgentUpdateCapability `json:"agent_update"`
+	// Privilege is how the agent runs; nil when the build does not tell.
+	Privilege *PrivilegeCapability `json:"privilege,omitempty"`
 }
 
 // AgentUpdateCapability tells the backend whether it may send

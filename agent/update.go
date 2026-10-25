@@ -78,6 +78,10 @@ func (daemon *daemon) capabilities(ctx context.Context) *Capabilities {
 		reason := capability.Reason
 		result.AgentUpdate.Reason = &reason
 	}
+	if probe := daemon.options.Privilege; probe != nil {
+		privilege := probe.Capability(ctx)
+		result.Privilege = &privilege
+	}
 	return result
 }
 

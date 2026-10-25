@@ -39,6 +39,8 @@ func NewRootCommand(version string) *cobra.Command {
 	root.AddCommand(newRunCommand(version, &configPath))
 	root.AddCommand(newSetupCommand(version))
 	root.AddCommand(newInternalUpdateCommand())
+	root.AddCommand(newInternalHelperCommand())
+	root.AddCommand(newInternalUnprivilegeCommand())
 	return root
 }
 

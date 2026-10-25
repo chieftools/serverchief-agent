@@ -19,30 +19,27 @@ TimeoutStartSec=5min
 TimeoutStopSec=30s
 KillMode=mixed
 
-# Root is required: package databases, vhost configs and hosting-panel data
-# are only readable by root. Collectors are read-only and the command set is
-# closed, so the unit narrows what root can do instead.
-User=root
+# The serverchief user reads the host with CAP_DAC_READ_SEARCH (package
+# databases, vhost configs, panel data) but cannot write anything outside
+# its own directories. The few things that need root (refreshing package
+# lists, reading the Plesk database, installing an agent update) go through
+# serverchief-helper.service, which only runs a fixed list of actions.
+User=serverchief
+Group=serverchief
+AmbientCapabilities=CAP_DAC_READ_SEARCH
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+NoNewPrivileges=true
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 UMask=0077
 
-# Directives unknown to older systemd (CentOS 7 ships 219, Ubuntu 16.04
-# ships 229) are ignored with a warning, so the unit stays portable.
-# ProtectSystem=full keeps /usr, /boot and /etc read-only but leaves /var
-# and /run writable, which package-manager queries (apt/yum caches and
-# locks) and the package metadata refresh need: apt-get update writes
-# /var/lib/apt/lists and /var/cache/apt, yum/dnf
-# makecache write /var/cache/{yum,dnf}, /var/lib/dnf, /var/log and
-# /run/yum.pid. No ReadWritePaths= is needed. The refresh runs under
-# `nice -n 19 ionice -c3`, below the agent's own priority.
-# Reading /etc, /var/lib/dpkg, /var/lib/rpm and panel directories such as
-# /usr/local/directadmin or /opt/psa is unaffected.
-ProtectSystem=full
+# Directives unknown to older systemd (Ubuntu 16.04 ships 229) are ignored
+# with a warning, so the unit stays portable.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/serverchief /var/log/serverchief
 ProtectHome=read-only
 PrivateTmp=true
-NoNewPrivileges=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
@@ -55,6 +52,8 @@ SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 StateDirectory=serverchief
 StateDirectoryMode=0700
+LogsDirectory=serverchief
+LogsDirectoryMode=0750
 
 [Install]
 WantedBy=multi-user.target

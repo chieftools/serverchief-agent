@@ -19,6 +19,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -27,6 +28,8 @@ import (
 	"time"
 
 	"go.chief.tools/serverchief-agent/inventory"
+
+	"go.chief.tools/serverchief-agent/helper"
 )
 
 const vhostsTestdata = "testdata/vhosts"
@@ -810,5 +813,31 @@ func TestVHostsApacheFallsBackToNextControl(t *testing.T) {
 	info := collectVHosts(t, NewVHosts(host))
 	if len(info.Items) != 2 || !slices.Equal(ran, []string{"httpd -S", "apachectl -S"}) {
 		t.Fatalf("items %v, ran %v", vhostsJSON(t, info), ran)
+	}
+}
+
+func TestVHostsPleskThroughTheRootHelper(t *testing.T) {
+	// The root helper fetches the rows with the collector's own queries,
+	// the unprivileged daemon only parses them and runs nothing itself.
+	var ran []string
+	root := pleskHost(t, []vhostCommand{
+		{prefix: "plesk db -Ne SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS", file: "columns.txt"},
+		{prefix: "plesk db -Ne SELECT d.id, d.name", file: "domains.txt"},
+		{prefix: "plesk db -Ne SELECT dom_id, name FROM domain_aliases", file: "aliases.txt"},
+	}, &ran)
+	data, err := json.Marshal(root.FetchPleskSites(context.Background()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := collectVHosts(t, NewVHosts(root))
+
+	var daemonRan []string
+	daemon := pleskHost(t, nil, &daemonRan)
+	runner := &fakeRunner{result: helper.Result{Data: data}}
+	daemon.Privileged = runner
+	viaHelper := collectVHosts(t, NewVHosts(daemon))
+
+	if !reflect.DeepEqual(vhostsJSON(t, viaHelper), vhostsJSON(t, direct)) || len(direct.Items) == 0 || len(daemonRan) != 0 || !slices.Equal(runner.actions, []string{helper.ActionPleskSites}) {
+		t.Fatalf("via helper %s, ran %q, actions %q", vhostsJSON(t, viaHelper), daemonRan, runner.actions)
 	}
 }

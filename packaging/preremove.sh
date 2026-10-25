@@ -12,8 +12,8 @@ case "${1:-}" in
 esac
 
 if [ -d /run/systemd/system ]; then
-    systemctl stop serverchief.service || true
-    systemctl disable serverchief.service >/dev/null 2>&1 || true
+    systemctl stop serverchief.service serverchief-helper.path || true
+    systemctl disable serverchief.service serverchief-helper.path >/dev/null 2>&1 || true
 else
     if [ -x /etc/init.d/serverchief ]; then
         /etc/init.d/serverchief stop || true

@@ -57,7 +57,9 @@ if [ "${SKIP_BUILD:-0}" != 1 ]; then
 fi
 
 install -m 0755 "serverchief-linux-${GOARCH}" "${RPMBUILD_DIR}/SOURCES/serverchief"
-cp packaging/serverchief.service packaging/serverchief.init README.md LICENSE "${RPMBUILD_DIR}/SOURCES/"
+cp packaging/serverchief.service packaging/serverchief.init README.md LICENSE \
+    packaging/serverchief-helper.service packaging/serverchief-helper.path packaging/serverchief-root.service \
+    "${RPMBUILD_DIR}/SOURCES/"
 
 # Scriptlets are inlined: %post -f would also work, but %preun and %postun
 # need the shared scripts too.
@@ -78,6 +80,9 @@ Source0:        serverchief.service
 Source1:        serverchief.init
 Source2:        README.md
 Source3:        LICENSE
+Source4:        serverchief-helper.service
+Source5:        serverchief-helper.path
+Source6:        serverchief-root.service
 
 %global debug_package %{nil}
 %global _build_id_links none
@@ -96,16 +101,23 @@ mkdir -p %{buildroot}/usr/lib/systemd/system
 mkdir -p %{buildroot}/etc/rc.d/init.d
 mkdir -p %{buildroot}/usr/share/doc/serverchief
 mkdir -p %{buildroot}/usr/share/licenses/serverchief
+mkdir -p %{buildroot}/usr/share/serverchief
 
 install -m 0755 %{_sourcedir}/serverchief %{buildroot}/usr/bin/serverchief
 install -m 0644 %{SOURCE0} %{buildroot}/usr/lib/systemd/system/serverchief.service
 install -m 0755 %{SOURCE1} %{buildroot}/etc/rc.d/init.d/serverchief
 install -m 0644 %{SOURCE2} %{buildroot}/usr/share/doc/serverchief/README.md
 install -m 0644 %{SOURCE3} %{buildroot}/usr/share/licenses/serverchief/LICENSE
+install -m 0644 %{SOURCE4} %{buildroot}/usr/lib/systemd/system/serverchief-helper.service
+install -m 0644 %{SOURCE5} %{buildroot}/usr/lib/systemd/system/serverchief-helper.path
+install -m 0644 %{SOURCE6} %{buildroot}/usr/share/serverchief/serverchief-root.service
 
 %files
 %attr(0755, root, root) /usr/bin/serverchief
 %attr(0644, root, root) /usr/lib/systemd/system/serverchief.service
+%attr(0644, root, root) /usr/lib/systemd/system/serverchief-helper.service
+%attr(0644, root, root) /usr/lib/systemd/system/serverchief-helper.path
+%attr(0644, root, root) /usr/share/serverchief/serverchief-root.service
 %config(noreplace) %attr(0755, root, root) /etc/rc.d/init.d/serverchief
 %doc %attr(0644, root, root) /usr/share/doc/serverchief/README.md
 %license %attr(0644, root, root) /usr/share/licenses/serverchief/LICENSE

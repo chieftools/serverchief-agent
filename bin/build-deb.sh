@@ -43,6 +43,7 @@ mkdir -p "${DEB_DIR}/DEBIAN" \
     "${DEB_DIR}/usr/bin" \
     "${DEB_DIR}/etc/init.d" \
     "${DEB_DIR}/lib/systemd/system" \
+    "${DEB_DIR}/usr/share/serverchief" \
     "${DEB_DIR}/usr/share/doc/serverchief"
 
 # SKIP_BUILD=1 packages an existing serverchief-linux-${GOARCH} binary,
@@ -56,6 +57,11 @@ install -m 0755 packaging/serverchief.init "${DEB_DIR}/etc/init.d/serverchief"
 # /lib/systemd/system rather than /usr/lib: Ubuntu 14.04-era systemd and
 # usrmerge-less Debian releases only read the former.
 install -m 0644 packaging/serverchief.service "${DEB_DIR}/lib/systemd/system/serverchief.service"
+install -m 0644 packaging/serverchief-helper.service "${DEB_DIR}/lib/systemd/system/serverchief-helper.service"
+install -m 0644 packaging/serverchief-helper.path "${DEB_DIR}/lib/systemd/system/serverchief-helper.path"
+# Installed as /etc/systemd/system/serverchief.service by postinst where
+# systemd cannot grant ambient capabilities (before 229).
+install -m 0644 packaging/serverchief-root.service "${DEB_DIR}/usr/share/serverchief/serverchief-root.service"
 install -m 0644 README.md "${DEB_DIR}/usr/share/doc/serverchief/README.md"
 install -m 0644 LICENSE "${DEB_DIR}/usr/share/doc/serverchief/copyright"
 

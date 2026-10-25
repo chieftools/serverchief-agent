@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -160,7 +161,8 @@ func (host *Host) userRoot(dir string) string {
 		if err != nil {
 			break
 		}
-		if uid, known := fileOwner(info); known && uid != 0 {
+		// Root's and the agent's own files are not a hosting user's tree
+		if uid, known := fileOwner(info); known && uid != 0 && int(uid) != os.Geteuid() {
 			return current
 		}
 	}

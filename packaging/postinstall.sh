@@ -3,10 +3,6 @@
 # upgrade) and the RPM %post ($1 = number of installed versions).
 set -eu
 
-install -d -m 0750 /etc/serverchief
-install -d -m 0700 /var/lib/serverchief
-install -d -m 0750 /var/log/serverchief
-
 upgrade=false
 case "${1:-}" in
     configure)
@@ -19,11 +15,66 @@ case "${1:-}" in
         ;;
 esac
 
+# The daemon runs as the serverchief system user with CAP_DAC_READ_SEARCH;
+# serverchief-helper.service runs the few actions that need root.
+if ! getent group serverchief >/dev/null; then
+    groupadd --system serverchief
+fi
+if ! getent passwd serverchief >/dev/null; then
+    nologin="$(command -v nologin || echo /bin/false)"
+    useradd --system --gid serverchief --home-dir /var/lib/serverchief \
+        --no-create-home --shell "$nologin" --comment 'Server Chief agent' serverchief
+fi
+
+state=/var/lib/serverchief
+override=/etc/systemd/system/serverchief.service
+template=/usr/share/serverchief/serverchief-root.service
+
+# An agent update from a version that ran as root is driven by that
+# version's update helper, which only trusts files root owns. The new
+# daemon then runs as root once more and hands the state directory to the
+# serverchief user itself when the update is done (a transitional override).
+transitional=false
+if [ -e "$state/update-request.json" ] && [ "$(stat -c %u "$state" 2>/dev/null || echo 0)" = 0 ]; then
+    transitional=true
+fi
+
+install -d -m 0750 -o root -g serverchief /etc/serverchief
+for file in identity.json config.json; do
+    if [ -f "/etc/serverchief/$file" ]; then
+        chgrp serverchief "/etc/serverchief/$file"
+        chmod 0640 "/etc/serverchief/$file"
+    fi
+done
+install -d -m 0700 "$state"
+install -d -m 0750 /var/log/serverchief
+if [ "$transitional" = false ]; then
+    chown -R serverchief:serverchief "$state" /var/log/serverchief
+fi
+install -d -m 0700 -o serverchief -g serverchief "$state/helper"
+
 # Pick the init system at runtime; the package does not depend on systemd.
 # Enabling the service is left to `serverchief setup`; an upgrade restarts
 # an agent that is already running.
 if [ -d /run/systemd/system ]; then
+    version="$(systemctl --version 2>/dev/null | awk 'NR == 1 { print $2 }')"
+    case "$version" in
+        ''|*[!0-9]*) version=0 ;;
+    esac
+    if [ "$version" -lt 229 ]; then
+        # No ambient capabilities: run the daemon as root, as before.
+        install -m 0644 "$template" "$override"
+    elif [ "$transitional" = true ]; then
+        sed 's/^# serverchief-root-override: permanent$/# serverchief-root-override: transitional/' "$template" > "$override"
+        chmod 0644 "$override"
+    elif [ -f "$override" ] && grep -q '^# serverchief-root-override:' "$override"; then
+        rm -f "$override"
+    fi
     systemctl daemon-reload || true
+    if [ "$version" -ge 229 ]; then
+        systemctl enable serverchief-helper.path >/dev/null 2>&1 || true
+        systemctl start serverchief-helper.path || true
+    fi
     if [ "$upgrade" = true ]; then
         systemctl try-restart serverchief.service || true
     fi

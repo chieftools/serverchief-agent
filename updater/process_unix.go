@@ -32,7 +32,9 @@ func processAlive(pid int) bool {
 // fcntl(F_SETLK), held until release or exit. acquired is false when
 // another process holds it.
 func AcquireLock(path string) (release func(), acquired bool, err error) {
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|syscall.O_NOCTTY, 0o600)
+	// O_NOFOLLOW: the state directory belongs to the unprivileged daemon,
+	// so root never follows a link planted there.
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|syscall.O_NOCTTY|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, false, err
 	}
@@ -67,7 +69,7 @@ func LockHeld(path string) bool {
 // /dev/null and stdout/stderr appended to logPath, and does not wait for
 // it. The caller reaps it (or exits) to complete a double fork.
 func SpawnDetached(binary string, args []string, logPath string) (*exec.Cmd, error) {
-	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", logPath, err)
 	}

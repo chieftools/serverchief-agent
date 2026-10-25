@@ -15,8 +15,10 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -219,6 +221,9 @@ func Enroll(ctx context.Context, token string, options EnrollOptions) (EnrollRes
 		EnrolledAt:       options.Now().UTC().Truncate(time.Second),
 	}
 	if err := writeJSON(options.Paths.Identity, identity); err != nil {
+		return EnrollResult{}, fmt.Errorf("save identity: %w", err)
+	}
+	if err := shareWithAgentGroup(options.Paths.Identity); err != nil {
 		return EnrollResult{}, fmt.Errorf("save identity: %w", err)
 	}
 	if err := resetDeliveryState(options.Paths, response.ServerConfig()); err != nil {
@@ -437,6 +442,24 @@ func writeJSON(path string, value any) error {
 		return err
 	}
 	return inventory.WriteFileAtomic(path, append(data, '\n'), 0o600)
+}
+
+// shareWithAgentGroup lets the unprivileged daemon read a file setup wrote
+// as root: root:serverchief, mode 0640. Without the serverchief group (a
+// daemon that runs as root, or setup outside the package) it stays 0600.
+func shareWithAgentGroup(path string) error {
+	group, err := user.LookupGroup(AgentGroup)
+	if err != nil || os.Geteuid() != 0 {
+		return nil
+	}
+	gid, err := strconv.Atoi(group.Gid)
+	if err != nil {
+		return nil
+	}
+	if err := os.Lchown(path, 0, gid); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o640)
 }
 
 func removeIfExists(path string) error {

@@ -1,0 +1,64 @@
+# Installed by the serverchief package as /etc/systemd/system/serverchief.service
+# where the agent runs as root: systemd before 229 cannot grant the ambient
+# capability the unprivileged unit needs. Do not edit; the package replaces it.
+# serverchief-root-override: permanent
+[Unit]
+Description=Server Chief inventory agent
+Documentation=https://server.chief.app
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# The agent sends READY=1 after its first collection round and supports
+# `systemctl reload` (SIGHUP: reload config, reopen logs, collect again).
+Type=notify
+ExecStart=/usr/bin/serverchief run
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10s
+# Exit status 2: the backend revoked the credential. Restarting would only
+# hammer the API until `serverchief setup` runs again.
+RestartPreventExitStatus=2
+TimeoutStartSec=5min
+TimeoutStopSec=30s
+KillMode=mixed
+
+# Root, because this systemd cannot grant CAP_DAC_READ_SEARCH to an
+# unprivileged user. Collectors are read-only and the command set is closed,
+# so the unit narrows what root can do instead.
+User=root
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+
+# Directives unknown to older systemd (CentOS 7 ships 219, Ubuntu 16.04
+# ships 229) are ignored with a warning, so the unit stays portable.
+# ProtectSystem=full keeps /usr, /boot and /etc read-only but leaves /var
+# and /run writable, which package-manager queries (apt/yum caches and
+# locks) and the package metadata refresh need: apt-get update writes
+# /var/lib/apt/lists and /var/cache/apt, yum/dnf
+# makecache write /var/cache/{yum,dnf}, /var/lib/dnf, /var/log and
+# /run/yum.pid. No ReadWritePaths= is needed. The refresh runs under
+# `nice -n 19 ionice -c3`, below the agent's own priority.
+# Reading /etc, /var/lib/dpkg, /var/lib/rpm and panel directories such as
+# /usr/local/directadmin or /opt/psa is unaffected.
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+# AF_NETLINK is required to enumerate interfaces and addresses.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+StateDirectory=serverchief
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

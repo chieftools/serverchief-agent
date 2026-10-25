@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"io"
 	"io/fs"
 	"net"
 	"net/netip"
@@ -17,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"go.chief.tools/serverchief-agent/helper"
 	"go.chief.tools/serverchief-agent/pkglock"
 )
 
@@ -80,6 +82,9 @@ type Host struct {
 	// Roots returns the trust anchors that certificate chains are verified
 	// against. nil leaves chain completeness undetermined.
 	Roots func() *x509.CertPool
+	// Privileged runs the actions that need root through the root helper
+	// when the daemon runs unprivileged. nil runs them directly.
+	Privileged helper.Runner
 }
 
 // CommandResult is the outcome of Host.Command.
@@ -187,8 +192,28 @@ func relative(name string) string {
 	return name
 }
 
+const (
+	// maxReadFile caps a regular file a collector reads; dpkg's status
+	// database is the largest.
+	maxReadFile = 128 << 20
+	// maxPseudoFile caps a /proc or /sys file, which report no size.
+	maxPseudoFile = 8 << 20
+)
+
+// readFile reads a file with the symlink policy of resolvePath: a link in
+// a user-owned tree never leads the agent outside that tree. /proc and
+// /sys files are read up to maxPseudoFile.
 func (host *Host) readFile(name string) ([]byte, error) {
-	return fs.ReadFile(host.FS, relative(name))
+	clean := path.Clean("/" + name)
+	if strings.HasPrefix(clean, "/proc/") || strings.HasPrefix(clean, "/sys/") {
+		file, err := host.FS.Open(relative(clean))
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+		return io.ReadAll(io.LimitReader(file, maxPseudoFile))
+	}
+	return host.readBoundedFile(clean, maxReadFile)
 }
 
 // readString reads a small attribute file and trims surrounding whitespace.

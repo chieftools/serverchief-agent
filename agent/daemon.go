@@ -28,8 +28,10 @@ const (
 
 // RunOptions configures Run.
 type RunOptions struct {
-	Registry *collector.Registry
-	Store    *inventory.StateStore
+	// Privilege reports how the agent runs; nil leaves it out.
+	Privilege *PrivilegeProbe
+	Registry  *collector.Registry
+	Store     *inventory.StateStore
 	// Payloads keeps the bases of delta datasets. Without it every dataset
 	// is sent in full.
 	Payloads *inventory.PayloadStore

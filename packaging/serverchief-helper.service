@@ -1,0 +1,26 @@
+[Unit]
+Description=Run Server Chief agent requests that need root
+Documentation=https://server.chief.app
+# The daemon may ask a few times in a row; never stop answering.
+StartLimitIntervalSec=0
+
+[Service]
+# Runs every pending request in /var/lib/serverchief/helper and exits. It
+# only knows a fixed list of actions without arguments: refresh the package
+# lists, read the Plesk sites, start an agent update, and answer a ping.
+Type=oneshot
+User=root
+ExecStart=/usr/bin/serverchief internal-helper
+StartLimitInterval=0
+TimeoutStartSec=20min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+PrivateTmp=true
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK

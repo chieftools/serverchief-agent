@@ -4,6 +4,16 @@
     "agent_update": {
       "available": true,
       "reason": null
+    },
+    "privilege": {
+      "helper_actions": [
+        "ping",
+        "plesk-sites",
+        "refresh-metadata",
+        "start-agent-update"
+      ],
+      "mode": "unprivileged",
+      "reason": null
     }
   },
   "hashes": {

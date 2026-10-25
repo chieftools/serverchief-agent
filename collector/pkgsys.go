@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"go.chief.tools/serverchief-agent/helper"
 	"go.chief.tools/serverchief-agent/pkglock"
 )
 
@@ -165,7 +166,7 @@ func (system *PackageSystem) RefreshMetadata(ctx context.Context) error {
 		return err
 	}
 	name := filepath.Base(refreshVerb(argv)[0])
-	result, err := host.run(ctx, argv[0], argv[1:]...)
+	result, err := host.runRefresh(ctx, argv)
 	if ctx.Err() != nil {
 		return fmt.Errorf("%s timed out or was cancelled: %w", name, ctx.Err())
 	}
@@ -235,4 +236,17 @@ func rpmFailure(result CommandResult) string {
 		return message
 	}
 	return lastLine(result.Stdout)
+}
+
+// runRefresh runs the refresh argv, through the root helper when the
+// daemon runs unprivileged: the helper builds the same argv itself.
+func (host *Host) runRefresh(ctx context.Context, argv []string) (CommandResult, error) {
+	if host.Privileged == nil {
+		return host.run(ctx, argv[0], argv[1:]...)
+	}
+	result, err := host.Privileged.Do(ctx, helper.ActionRefreshMetadata, nil)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	return CommandResult{Stdout: result.Stdout, Stderr: result.Stderr, ExitCode: result.ExitCode}, nil
 }

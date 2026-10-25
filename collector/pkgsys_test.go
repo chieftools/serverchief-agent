@@ -20,6 +20,8 @@ import (
 
 	"go.chief.tools/serverchief-agent/pkglock"
 	"go.chief.tools/serverchief-agent/updater"
+
+	"go.chief.tools/serverchief-agent/helper"
 )
 
 // fakeTracker returns a lock tracker whose only lock is held while *held.
@@ -665,5 +667,37 @@ func TestNoMutatingPackageVerbsInSource(t *testing.T) {
 		if !used[verb] {
 			t.Errorf("%s no longer uses %q; drop it from the exemption", updateCommands, verb)
 		}
+	}
+}
+
+// fakeRunner stands in for the root helper.
+type fakeRunner struct {
+	actions []string
+	result  helper.Result
+	err     error
+}
+
+func (runner *fakeRunner) Do(_ context.Context, action string, args map[string]string) (helper.Result, error) {
+	runner.actions = append(runner.actions, action)
+	if len(args) > 0 {
+		return helper.Result{}, errors.New("unexpected arguments")
+	}
+	return runner.result, runner.err
+}
+
+func TestRefreshMetadataThroughTheRootHelper(t *testing.T) {
+	host, ran := refreshHost(osUbuntu1604, "/usr/bin/apt-get")
+	host.Command = func(_ context.Context, name string, args ...string) (CommandResult, error) {
+		*ran = append(*ran, append([]string{name}, args...))
+		return CommandResult{}, nil
+	}
+	runner := &fakeRunner{result: helper.Result{ExitCode: 100, Stderr: []byte("E: Could not get lock /var/lib/apt/lists/lock. It is held by process 4242 (apt-get)\n")}}
+	host.Privileged = runner
+
+	err := NewPackageSystem(host).RefreshMetadata(context.Background())
+
+	var busy *BusyError
+	if !errors.As(err, &busy) || len(*ran) != 0 || !slices.Equal(runner.actions, []string{helper.ActionRefreshMetadata}) {
+		t.Fatalf("err = %v, ran %q, actions %q", err, *ran, runner.actions)
 	}
 }

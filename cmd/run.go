@@ -12,6 +12,7 @@ import (
 
 	"go.chief.tools/serverchief-agent/agent"
 	"go.chief.tools/serverchief-agent/collector"
+	"go.chief.tools/serverchief-agent/helper"
 	"go.chief.tools/serverchief-agent/initsys"
 	"go.chief.tools/serverchief-agent/inventory"
 	"go.chief.tools/serverchief-agent/logging"
@@ -111,13 +112,35 @@ the systemd unit does not restart.`,
 			}
 
 			updates := updater.NewController(version, initsys.DetectSystem(), paths.Updates, os.Geteuid())
+			privilege := newPrivilegeProbe(command.Context())
+			if privilege.Unprivileged {
+				// Root work goes through the root helper's fixed actions
+				host.Privileged = privilege.Runner
+				launch := privilege.Runner
+				updates.Launch = func(ctx context.Context) error {
+					launchContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
+					defer cancel()
+					_, err := launch.Do(launchContext, helper.ActionStartAgentUpdate, nil)
+					return err
+				}
+				detect := updates.Detect
+				updates.Detect = func(ctx context.Context) updater.Capability {
+					if !privilege.HelperAnswers(ctx) {
+						return updater.Capability{Reason: "the root helper does not answer"}
+					}
+					return detect(ctx)
+				}
+			}
+			log.Printf("[agent] privilege: %s", privilege.Capability(command.Context()).Mode)
 
 			ctx := command.Context()
+			watchPrivilegeTransition(ctx, updates)
 			reload := make(chan agent.Config)
 			stopReload := watchReload(ctx, *configPath, logWriter, reload)
 			defer stopReload()
 
 			err = agent.Run(ctx, agent.RunOptions{
+				Privilege:    privilege,
 				Registry:     collector.Default(host),
 				Store:        store,
 				Payloads:     inventory.NewPayloadStore(paths.Payloads),
