@@ -19,6 +19,9 @@
 #                        e.g. "apt-get install -y nginx php"
 #   --no-refresh         don't refresh the package metadata cache on first start
 #
+# The metrics gateway is reached at metrics.<endpoint host> (a local
+# `valet proxy`, see serverchief-metrics/docs/deployment.md).
+#
 # Containers are named serverchief-dev-NAME and restart until removed. The
 # binary is mounted from .dev-agent/ in this repository, so `rebuild` picks up
 # code changes without re-enrolling. Enrollment state lives inside the container, so
@@ -32,7 +35,7 @@ PREFIX=serverchief-dev-
 LABEL=tools.chief.serverchief.dev-agent=1
 
 usage() {
-    sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-1}"
 }
 
@@ -132,6 +135,7 @@ cmd_up() {
         --label "${LABEL}" \
         --restart unless-stopped \
         --add-host "${host}:host-gateway" \
+        --add-host "metrics.${host}:host-gateway" \
         -v "${PWD}/.dev-agent/linux-${arch}:/opt/serverchief-dev:ro" \
         -v "${ca_file}:/etc/serverchief-dev-ca.pem:ro" \
         -e SERVERCHIEF_ENDPOINT="${endpoint}" \
