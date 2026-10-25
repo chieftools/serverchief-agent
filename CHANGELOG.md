@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.2.0]
+
 ### Added
 
 - Added host metrics. When Server Chief turns them on, the agent samples CPU, load, memory, swap, file systems, disks, network, TCP connections and uptime every minute and sends them to the Server Chief metrics gateway. Samples wait in a spool of up to 24 hours while the gateway cannot be reached. See [Metrics](README.md#metrics).
@@ -40,6 +42,7 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.0
 [0.1.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.1.1
 [0.1.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.1.0
