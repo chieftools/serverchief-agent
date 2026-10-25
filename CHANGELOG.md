@@ -16,6 +16,7 @@ release.
 - Added live metrics. While someone watches a server's charts in Server Chief, the agent reads usage every second and sends it to the metrics gateway every 2 seconds, for at most 5 minutes per request and only while a browser is watching. Live samples are not stored, spooled or retried, and leave out file systems.
 - File system metrics count each file system once, by its device number, also when it has no device path, such as a ZFS dataset mounted in two places. Of several mounts, the one of the whole file system is reported rather than a bind mount of a directory in it.
 - The `system` dataset reports whether a container has lxcfs (`virtualization.lxcfs`). Without it, a container's CPU, load and memory metrics are those of its host, which Server Chief now points out.
+- The `system` dataset reports PHP builds no package manager owns, such as DirectAdmin custombuilds in `/usr/local/php82` and source builds under `/opt`, with their exact version (`php_builds`). The version is read from each build's `php-config`; no binary is run.
 
 ### Changed
 

@@ -28,6 +28,8 @@ type SystemInfo struct {
 	// AgentArch is the architecture the agent binary was built for. It
 	// differs from Arch under emulation (for example amd64 on arm64).
 	AgentArch string `json:"agent_arch"`
+	// PHPBuilds are PHP installations no package manager owns.
+	PHPBuilds []PHPBuild `json:"php_builds"`
 }
 
 // Kernel identifies the running kernel.
@@ -69,6 +71,7 @@ func (collector *System) Collect(ctx context.Context) (any, error) {
 		Timezone:       host.readTimezone(),
 		Init:           string(initsys.Detect(host.FS)),
 		AgentArch:      runtime.GOARCH,
+		PHPBuilds:      host.readPHPBuilds(),
 	}
 	return info, nil
 }
