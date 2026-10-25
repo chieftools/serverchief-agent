@@ -233,18 +233,35 @@ func parseMemoryUsage(data []byte) MemoryUsage {
 }
 
 // readFilesystemUsage covers the inventory's local file systems, once per
-// device, so bind mounts of one file system are not counted twice.
+// file system, so bind mounts of one file system are not counted twice.
 func (host *Host) readFilesystemUsage() []FilesystemUsage {
 	if host.Statfs == nil {
 		return nil
 	}
+	filesystems := host.readMountedFilesystems()
+	mounts := host.readMountInfo()
+	// Of several mounts of one file system, keep the one that mounts it
+	// whole rather than a bind mount of a directory in it.
+	preferred := make(map[string]string)
+	for _, filesystem := range filesystems {
+		if info, ok := mounts[filesystem.MountPoint]; ok {
+			if _, found := preferred[info.Device]; !found || info.Root == "/" && mounts[preferred[info.Device]].Root != "/" {
+				preferred[info.Device] = filesystem.MountPoint
+			}
+		}
+	}
 	devices := make(map[string]bool)
 	var result []FilesystemUsage
-	for _, filesystem := range host.readMountedFilesystems() {
+	for _, filesystem := range filesystems {
 		if filesystem.Network {
 			continue
 		}
-		if strings.HasPrefix(filesystem.Device, "/") {
+		if info, ok := mounts[filesystem.MountPoint]; ok {
+			if preferred[info.Device] != filesystem.MountPoint {
+				continue
+			}
+		} else if strings.HasPrefix(filesystem.Device, "/") {
+			// Without mountinfo, the device path tells file systems apart.
 			if devices[filesystem.Device] {
 				continue
 			}
@@ -260,6 +277,32 @@ func (host *Host) readFilesystemUsage() []FilesystemUsage {
 		}
 	}
 	return result
+}
+
+// mountInfo is a mount's file system, by its major:minor device number,
+// and the directory of that file system the mount shows: "/" for the whole
+// file system, a subdirectory for a bind mount of one.
+type mountInfo struct {
+	Device string
+	Root   string
+}
+
+// readMountInfo reads /proc/self/mountinfo by mount point; a later mount
+// over the same point hides the earlier one. Empty when it is unreadable.
+func (host *Host) readMountInfo() map[string]mountInfo {
+	data, err := host.readFile("/proc/self/mountinfo")
+	if err != nil {
+		return nil
+	}
+	mounts := make(map[string]mountInfo)
+	for _, line := range lines(data) {
+		fields := strings.Fields(line)
+		if len(fields) < 5 || !strings.Contains(fields[2], ":") {
+			continue
+		}
+		mounts[unescapeMount(fields[4])] = mountInfo{Device: fields[2], Root: unescapeMount(fields[3])}
+	}
+	return mounts
 }
 
 // readDiskCounters reads whole devices from /proc/diskstats: those listed in

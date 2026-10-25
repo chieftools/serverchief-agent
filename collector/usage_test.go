@@ -201,3 +201,35 @@ func TestReadUsageWithoutSources(t *testing.T) {
 		t.Fatalf("usage = %+v", usage)
 	}
 }
+
+func TestReadUsageCountsBindMountsOfOneFileSystemOnce(t *testing.T) {
+	host := usageHost()
+	filesystem := host.FS.(fstest.MapFS)
+	file := func(data string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(data)} }
+	// A ZFS dataset has no device path: its bind mount of a directory comes
+	// first, and only mountinfo tells it is the same file system.
+	filesystem["proc/mounts"] = file(`/dev/vda1 / ext4 rw,relatime 0 0
+tank/data /srv/www zfs rw 0 0
+tank/data /data zfs rw 0 0
+tank/logs /data/logs zfs rw 0 0
+`)
+	filesystem["proc/self/mountinfo"] = file(`22 1 252:1 / / rw,relatime - ext4 /dev/vda1 rw
+40 22 0:52 /www /srv/www rw - zfs tank/data rw
+41 22 0:52 / /data rw - zfs tank/data rw
+42 41 0:53 / /data/logs rw - zfs tank/logs rw
+`)
+	for _, directory := range []string{"srv/www", "data", "data/logs"} {
+		filesystem[directory] = &fstest.MapFile{Mode: 0o755 | 1<<31}
+	}
+	host.Statfs = func(path string) (FSStats, error) {
+		return FSStats{SizeBytes: 10 << 30, FreeBytes: 5 << 30, AvailableBytes: 5 << 30}, nil
+	}
+
+	mounts := []string{}
+	for _, usage := range host.ReadUsage().Filesystems {
+		mounts = append(mounts, usage.MountPoint)
+	}
+	if !reflect.DeepEqual(mounts, []string{"/", "/data", "/data/logs"}) {
+		t.Errorf("file systems = %v, want each file system once, mounted whole", mounts)
+	}
+}
