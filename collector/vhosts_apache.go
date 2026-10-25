@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"go.chief.tools/serverchief-agent/helper"
 )
 
 // apacheControls are tried in order until one answers -S. apache2ctl
@@ -44,8 +46,26 @@ func (host *Host) apacheControls() []string {
 	return found
 }
 
-// apacheDumpVHosts runs -S with the first control program that succeeds.
-func (host *Host) apacheDumpVHosts(ctx context.Context) ([]byte, error) {
+// apacheVHosts runs -S, through the root helper when the unprivileged daemon
+// cannot: ModSecurity's SecAuditLog and similar directives open files for
+// writing while the configuration is read.
+func (host *Host) apacheVHosts(ctx context.Context) ([]byte, error) {
+	output, err := host.DumpApacheVHosts(ctx)
+	if err == nil || host.Privileged == nil || ctx.Err() != nil {
+		return output, err
+	}
+	result, helperErr := host.Privileged.Do(ctx, helper.ActionApacheVHosts, nil)
+	switch {
+	case helperErr != nil:
+		return nil, fmt.Errorf("%w; through the helper: %v", err, helperErr)
+	case result.Error != "":
+		return nil, fmt.Errorf("%w; through the helper: %s", err, result.Error)
+	}
+	return result.Stdout, nil
+}
+
+// DumpApacheVHosts runs -S with the first control program that succeeds.
+func (host *Host) DumpApacheVHosts(ctx context.Context) ([]byte, error) {
 	var failures []string
 	for _, control := range host.apacheControls() {
 		result, err := host.run(ctx, control, "-S")
@@ -141,7 +161,7 @@ func parseApacheDump(data []byte) apacheDump {
 
 func collectApache(ctx context.Context, run *vhostRun) ([]VHost, error) {
 	host := run.host
-	output, err := host.apacheDumpVHosts(ctx)
+	output, err := host.apacheVHosts(ctx)
 	if err != nil {
 		return nil, err
 	}

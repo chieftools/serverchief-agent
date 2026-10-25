@@ -73,6 +73,16 @@ func helperActions() helper.Actions {
 				return helper.Result{Data: data}
 			},
 		},
+		helper.ActionApacheVHosts: {
+			Timeout: 2 * time.Minute,
+			Run: func(ctx context.Context, _ map[string]string) helper.Result {
+				output, err := collector.NewHost("/").DumpApacheVHosts(ctx)
+				if err != nil {
+					return helper.Result{Error: err.Error()}
+				}
+				return helper.Result{Stdout: output}
+			},
+		},
 		helper.ActionStartAgentUpdate: {
 			Timeout: time.Minute,
 			Run: func(ctx context.Context, _ map[string]string) helper.Result {

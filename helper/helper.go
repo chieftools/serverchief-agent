@@ -41,6 +41,10 @@ const (
 	// their names from `plesk bin site --list` when that fails. The query
 	// is built by the helper, never by the daemon.
 	ActionPleskSites = "plesk-sites"
+	// ActionApacheVHosts runs `apachectl -S` for the vhost list when the
+	// daemon cannot: modules such as ModSecurity open their log files for
+	// writing while the configuration is read.
+	ActionApacheVHosts = "apache-vhosts"
 	// ActionStartAgentUpdate starts the update helper for the update
 	// request the daemon wrote to its state directory.
 	ActionStartAgentUpdate = "start-agent-update"

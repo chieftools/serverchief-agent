@@ -841,3 +841,34 @@ func TestVHostsPleskThroughTheRootHelper(t *testing.T) {
 		t.Fatalf("via helper %s, ran %q, actions %q", vhostsJSON(t, viaHelper), daemonRan, runner.actions)
 	}
 }
+
+func TestVHostsApacheThroughTheRootHelperWhenTheDaemonCannotReadTheConfig(t *testing.T) {
+	// ModSecurity opens SecAuditLog for writing while Apache reads its
+	// configuration, which the read-only daemon cannot do; root can.
+	dump, err := os.ReadFile(filepath.Join(vhostsTestdata, "apache-el9", "commands", "httpd-S.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing := []byte("AH00526: Syntax error on line 58 of /etc/httpd/conf.d/mod_security.conf:\nModSecurity: Failed to open the audit log file: /var/log/modsec_audit.log\n")
+	var ran []string
+	host := &Host{
+		FS: vhostFixture(t, "apache-el9", map[string][]byte{"usr/sbin/httpd": nil}),
+		Command: vhostCommands(t, "apache-el9", []vhostCommand{
+			{prefix: "httpd -S", data: failing, exit: 1},
+		}, &ran),
+	}
+	runner := &fakeRunner{result: helper.Result{Stdout: dump}}
+	host.Privileged = runner
+
+	info := collectVHosts(t, NewVHosts(host))
+	if len(info.Items) != 2 || !slices.Equal(runner.actions, []string{helper.ActionApacheVHosts}) {
+		t.Fatalf("items %s, ran %q, actions %q", vhostsJSON(t, info), ran, runner.actions)
+	}
+
+	// A configuration that is broken for root as well keeps both reasons.
+	runner.result = helper.Result{Error: "httpd -S exited with status 1: AH00526: Syntax error"}
+	_, err = host.apacheVHosts(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "httpd -S exited with status 1") || !strings.Contains(err.Error(), "through the helper: httpd -S exited") {
+		t.Fatalf("error = %v", err)
+	}
+}

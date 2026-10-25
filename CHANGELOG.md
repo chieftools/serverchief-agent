@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Apache sites are listed again on servers whose Apache configuration opens files for writing while it is read, such as ModSecurity's `SecAuditLog`. The unprivileged agent cannot run `apachectl -S` there, so it asks the root helper, which has a new `apache-vhosts` action.
+
 ## [0.2.0]
 
 ### Added
