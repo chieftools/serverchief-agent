@@ -565,9 +565,13 @@ func (daemon *daemon) closeRealtime() {
 }
 
 // onRealtimeEvent runs on the realtime client's goroutines, so it only
-// signals the loop.
-func (daemon *daemon) onRealtimeEvent(event string) {
+// signals the loop or hands metrics.live to the metrics runner.
+func (daemon *daemon) onRealtimeEvent(event string, data []byte) {
 	switch event {
+	case EventMetricsLive:
+		if until, ok := LiveUntil(data); ok && daemon.options.Metrics != nil {
+			daemon.options.Metrics.Live(until)
+		}
 	case EventConfigUpdated:
 		notify(daemon.configWake)
 	case EventCommandsAvailable:

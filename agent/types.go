@@ -252,6 +252,8 @@ type MetricsCapability struct {
 	SpoolBytes int64 `json:"spool_bytes"`
 	// Error is the last delivery failure, nil after a success.
 	Error *string `json:"error"`
+	// Live is true when the agent answers metrics.live with live samples.
+	Live bool `json:"live"`
 }
 
 // Metrics is the metrics runner as the daemon sees it: it hands over the
@@ -259,6 +261,8 @@ type MetricsCapability struct {
 type Metrics interface {
 	Configure(config *MetricsConfig)
 	Status() MetricsCapability
+	// Live samples every second until until (metrics.live).
+	Live(until time.Time)
 }
 
 // AgentUpdateCapability tells the backend whether it may send

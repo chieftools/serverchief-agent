@@ -133,7 +133,8 @@ When the backend's configuration turns metrics on (`metrics: {enabled, endpoint,
 - **When:** samples are taken on interval boundaries (`at % interval == 0`), so a fleet lines up, and each agent sends a random 0–30 s after the boundary, so a fleet does not arrive at once.
 - **Spool:** every sample is a file in `/var/lib/serverchief/metrics/samples` until the gateway stored it. Up to 60 samples go out as one batch, which is kept as `batch.json` and resent unchanged after an ambiguous failure, so the gateway stores it once. The spool keeps at most 24 hours and 8 MiB, dropping the oldest samples first.
 - **Failures:** a `401` waits 5 minutes (a just-enrolled server the panel has not published yet), `403 metrics_disabled` drops the spool and waits for a new configuration, `426` waits for a new configuration, `429` and `503` honour `Retry-After`, and other errors back off from 2 s to 5 minutes. A rejected batch (`400`, `413`, `415`, `422`) is dropped.
-- **Heartbeat:** `capabilities.metrics {enabled, last_sent_at, spool_bytes, error}` lets the panel show when samples stop arriving. Turning metrics off clears the spool.
+- **Live:** the realtime event `metrics.live {until}` asks for live samples while someone watches the server's charts. The agent then reads usage every second (without file systems, so a slow network mount cannot hold it up) and posts two samples at a time to the gateway's `/v1/live`, until `until` (at most 5 minutes ahead; the panel repeats the event) or until the gateway reported no watching browser for 10 seconds. Live samples are never stored, spooled or retried; `401` and `403` end them until the next event.
+- **Heartbeat:** `capabilities.metrics {enabled, last_sent_at, spool_bytes, error, live}` lets the panel show when samples stop arriving and whether it can ask for live samples. Turning metrics off clears the spool.
 
 ### Privileges
 

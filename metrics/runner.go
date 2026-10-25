@@ -31,10 +31,13 @@ const (
 // It runs next to the daemon's loop, which can be busy collecting a dataset
 // for minutes, and only takes configuration from it.
 type Runner struct {
-	Read   func() collector.Usage
-	Spool  *Spool
-	Client *Client
-	Now    func() time.Time
+	Read func() collector.Usage
+	// ReadLive reads usage for live samples, without file systems; nil
+	// uses Read.
+	ReadLive func() collector.Usage
+	Spool    *Spool
+	Client   *Client
+	Now      func() time.Time
 
 	mutex      sync.Mutex
 	config     agent.MetricsConfig
@@ -44,18 +47,22 @@ type Runner struct {
 	changed    chan struct{}
 	wake       chan struct{}
 	offset     time.Duration
+	liveUntil  time.Time
+	liveWake   chan struct{}
+	liveTick   time.Duration
 }
 
 // NewRunner returns a runner that is disabled until Configure enables it.
 func NewRunner(read func() collector.Usage, spool *Spool, client *Client) *Runner {
 	return &Runner{
-		Read:    read,
-		Spool:   spool,
-		Client:  client,
-		Now:     time.Now,
-		changed: make(chan struct{}, 1),
-		wake:    make(chan struct{}, 1),
-		offset:  rand.N(maximumSendOffset),
+		Read:     read,
+		Spool:    spool,
+		Client:   client,
+		Now:      time.Now,
+		changed:  make(chan struct{}, 1),
+		wake:     make(chan struct{}, 1),
+		liveWake: make(chan struct{}, 1),
+		offset:   rand.N(maximumSendOffset),
 	}
 }
 
@@ -93,7 +100,7 @@ func (runner *Runner) Status() agent.MetricsCapability {
 	runner.mutex.Lock()
 	defer runner.mutex.Unlock()
 
-	status := agent.MetricsCapability{Enabled: runner.config.Enabled, SpoolBytes: runner.Spool.Bytes()}
+	status := agent.MetricsCapability{Enabled: runner.config.Enabled, SpoolBytes: runner.Spool.Bytes(), Live: true}
 	if !runner.lastSentAt.IsZero() {
 		at := runner.lastSentAt.UTC().Truncate(time.Second)
 		status.LastSentAt = &at
@@ -105,10 +112,14 @@ func (runner *Runner) Status() agent.MetricsCapability {
 	return status
 }
 
-// Run samples and delivers until ctx ends.
+// Run samples, delivers and answers live requests until ctx ends.
 func (runner *Runner) Run(ctx context.Context) {
 	var group sync.WaitGroup
-	group.Add(2)
+	group.Add(3)
+	go func() {
+		defer group.Done()
+		runner.liveLoop(ctx)
+	}()
 	go func() {
 		defer group.Done()
 		runner.sample(ctx)

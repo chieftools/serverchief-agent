@@ -9,6 +9,7 @@
       "enabled": true,
       "error": null,
       "last_sent_at": "2026-10-22T09:59:00Z",
+      "live": true,
       "spool_bytes": 1427
     },
     "privilege": {

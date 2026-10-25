@@ -74,3 +74,48 @@ func (client *Client) Send(ctx context.Context, endpoint string, prepared *Prepa
 	}
 	return &result, nil
 }
+
+// LiveRequest is the body of POST /v1/live.
+type LiveRequest struct {
+	ProtocolVersion int      `json:"protocol_version"`
+	Samples         []Sample `json:"samples"`
+}
+
+// LiveResponse is the answer to live samples: Watchers is how many browsers
+// stream the server.
+type LiveResponse struct {
+	ProtocolVersion int `json:"protocol_version"`
+	Forwarded       int `json:"forwarded"`
+	Watchers        int `json:"watchers"`
+}
+
+// SendLive posts live samples. A non-2xx answer is an *agent.ProblemError.
+func (client *Client) SendLive(ctx context.Context, endpoint string, samples []Sample) (*LiveResponse, error) {
+	body, err := json.Marshal(LiveRequest{ProtocolVersion: ProtocolVersion, Samples: samples})
+	if err != nil {
+		return nil, fmt.Errorf("encode live samples: %w", err)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+"/v1/live", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create live request: %w", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+client.Credential)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("User-Agent", client.UserAgent)
+
+	response, err := client.HTTP.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return nil, agent.DecodeProblem(response)
+	}
+	var result LiveResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<10)).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode live response: %w", err)
+	}
+	return &result, nil
+}

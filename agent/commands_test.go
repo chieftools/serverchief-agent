@@ -401,13 +401,13 @@ func TestRestartRecoversInterruptedAndUnacknowledgedCommands(t *testing.T) {
 func TestRealtimeSubscriptionChecksCommands(t *testing.T) {
 	setup := newCommandsSetup(t)
 	daemon := setup.start(t)
-	daemon.onRealtimeEvent(eventSubscribed)
+	daemon.onRealtimeEvent(eventSubscribed, nil)
 	select {
 	case <-daemon.commandsWake:
 	default:
 		t.Fatal("a fresh subscription did not check for commands")
 	}
-	daemon.onRealtimeEvent("inventory.requested")
+	daemon.onRealtimeEvent("inventory.requested", nil)
 	select {
 	case <-daemon.commandsWake:
 		t.Fatal("inventory.requested is no longer an event")
@@ -439,5 +439,22 @@ func TestCommandJournalPrunesReportedRecords(t *testing.T) {
 	}
 	if reopened.get("stale") != nil || reopened.get("c000") != nil || reopened.get("unreported") == nil || reopened.get("c104") == nil {
 		t.Fatal("pruned the wrong records")
+	}
+}
+
+func TestRealtimeMetricsLiveHandsTheWindowToTheRunner(t *testing.T) {
+	setup := newCommandsSetup(t)
+	metrics := &fakeMetrics{}
+	daemon := setup.start(t)
+	daemon.options.Metrics = metrics
+
+	daemon.onRealtimeEvent(EventMetricsLive, []byte(`{"until":1793001900}`))
+	daemon.onRealtimeEvent(EventMetricsLive, []byte(`{}`))
+	daemon.onRealtimeEvent(EventMetricsLive, nil)
+
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	if len(metrics.live) != 1 || !metrics.live[0].Equal(time.Unix(1793001900, 0)) {
+		t.Fatalf("live windows = %v", metrics.live)
 	}
 }

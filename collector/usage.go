@@ -111,6 +111,16 @@ var skippedInterfacePrefixes = []string{"veth", "docker", "br-", "cali", "flanne
 
 // ReadUsage reads every source; a missing source leaves its part empty.
 func (host *Host) ReadUsage() Usage {
+	return host.readUsage(true)
+}
+
+// ReadLiveUsage reads every source except file systems, for live samples
+// each second: statfs on a slow network mount must not hold them up.
+func (host *Host) ReadLiveUsage() Usage {
+	return host.readUsage(false)
+}
+
+func (host *Host) readUsage(filesystems bool) Usage {
 	usage := Usage{At: host.now()}
 	if data, err := host.readFile("/proc/stat"); err == nil {
 		usage.CPU, usage.Cores, usage.ProcsRunning, usage.ProcsBlocked = parseStat(data)
@@ -121,7 +131,9 @@ func (host *Host) ReadUsage() Usage {
 	if data, err := host.readFile("/proc/meminfo"); err == nil {
 		usage.Memory = parseMemoryUsage(data)
 	}
-	usage.Filesystems = host.readFilesystemUsage()
+	if filesystems {
+		usage.Filesystems = host.readFilesystemUsage()
+	}
 	usage.Disks = host.readDiskCounters()
 	if data, err := host.readFile("/proc/net/dev"); err == nil {
 		usage.Interfaces = host.markUnderlyingInterfaces(parseNetDev(data))

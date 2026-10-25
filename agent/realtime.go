@@ -3,16 +3,20 @@ package agent
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"go.chief.tools/serverchief-agent/pusher"
 )
 
-// Realtime events. They carry no data; they only wake the agent up.
+// Realtime events. They only wake the agent up; metrics.live carries until
+// how long someone watches the server's charts.
 const (
 	EventConfigUpdated     = "config.updated"
 	EventCommandsAvailable = "commands.available"
+	EventMetricsLive       = "metrics.live"
 	eventSubscribed        = "pusher_internal:subscription_succeeded"
 )
 
@@ -25,13 +29,14 @@ func RealtimeChannel(serverID string, generation uint64) string {
 type RealtimeAuthorizer func(ctx context.Context, socketID, channel string) (string, error)
 
 // RealtimeConnector connects to the realtime service, subscribes to
-// channel and calls onEvent for every event received on it. The returned
-// function disconnects.
-type RealtimeConnector func(config Realtime, channel string, authorize RealtimeAuthorizer, onEvent func(event string)) (stop func())
+// channel and calls onEvent for every event received on it, with the
+// event's decoded data (nil when it has none). The returned function
+// disconnects.
+type RealtimeConnector func(config Realtime, channel string, authorize RealtimeAuthorizer, onEvent func(event string, data []byte)) (stop func())
 
 // PusherConnector returns a RealtimeConnector backed by the pusher client.
 func PusherConnector(version, serverID, credential string, tlsConfig *tls.Config) RealtimeConnector {
-	return func(config Realtime, channel string, authorize RealtimeAuthorizer, onEvent func(string)) func() {
+	return func(config Realtime, channel string, authorize RealtimeAuthorizer, onEvent func(string, []byte)) func() {
 		pusherConfig := &pusher.Config{
 			Key:       config.Key,
 			Host:      config.Host,
@@ -52,10 +57,14 @@ func PusherConnector(version, serverID, credential string, tlsConfig *tls.Config
 		}
 		client.SetAuthorizer(pusher.Authorizer(authorize))
 		client.SetTLSConfig(tlsConfig)
-		for _, event := range []string{EventConfigUpdated, EventCommandsAvailable, eventSubscribed} {
+		for _, event := range []string{EventConfigUpdated, EventCommandsAvailable, EventMetricsLive, eventSubscribed} {
 			client.OnEvent(event, func(message pusher.Message) {
 				if message.Channel == "" || message.Channel == channel {
-					onEvent(message.Event)
+					var data json.RawMessage
+					if message.UnmarshalData(&data) != nil {
+						data = nil
+					}
+					onEvent(message.Event, data)
 				}
 			})
 		}
@@ -63,4 +72,15 @@ func PusherConnector(version, serverID, credential string, tlsConfig *tls.Config
 		go client.Start()
 		return client.Disconnect
 	}
+}
+
+// LiveUntil decodes the payload of metrics.live: {"until": <Unix seconds>}.
+func LiveUntil(data []byte) (time.Time, bool) {
+	var payload struct {
+		Until *int64 `json:"until"`
+	}
+	if json.Unmarshal(data, &payload) != nil || payload.Until == nil || *payload.Until <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(*payload.Until, 0), true
 }

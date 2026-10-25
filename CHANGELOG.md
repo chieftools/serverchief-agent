@@ -13,6 +13,7 @@ release.
 
 - Added host metrics. When Server Chief turns them on, the agent samples CPU, load, memory, swap, file systems, disks, network, TCP connections and uptime every minute and sends them to the Server Chief metrics gateway. Samples wait in a spool of up to 24 hours while the gateway cannot be reached. See [Metrics](README.md#metrics).
 - Added `serverchief sample` to preview a metrics sample locally.
+- Added live metrics. While someone watches a server's charts in Server Chief, the agent reads usage every second and sends it to the metrics gateway every 2 seconds, for at most 5 minutes per request and only while a browser is watching. Live samples are not stored, spooled or retried, and leave out file systems.
 
 ### Changed
 

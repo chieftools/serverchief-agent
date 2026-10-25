@@ -793,11 +793,11 @@ func TestRunHeartbeatsFetchesConfigAndReactsToRealtime(t *testing.T) {
 	type connection struct {
 		channel   string
 		authorize RealtimeAuthorizer
-		onEvent   func(string)
+		onEvent   func(string, []byte)
 	}
 	connections := make(chan connection, 4)
 	stops := make(chan struct{}, 4)
-	options.Realtime = func(config Realtime, channel string, authorize RealtimeAuthorizer, onEvent func(string)) func() {
+	options.Realtime = func(config Realtime, channel string, authorize RealtimeAuthorizer, onEvent func(string, []byte)) func() {
 		connections <- connection{channel, authorize, onEvent}
 		return func() { stops <- struct{}{} }
 	}
@@ -853,7 +853,7 @@ func TestRunHeartbeatsFetchesConfigAndReactsToRealtime(t *testing.T) {
 	// out, then its result is reported.
 	server.addCommand("01jb9a2c3d4e5f6g7h8j9k0m1n", CommandRefreshInventory, `{"datasets":null}`)
 	system.set("changed", nil)
-	realtime.onEvent(EventCommandsAvailable)
+	realtime.onEvent(EventCommandsAvailable, nil)
 	waitFor("/commands")
 	waitFor("/commands/01jb9a2c3d4e5f6g7h8j9k0m1n/ack")
 	waitFor("/inventory")
@@ -863,7 +863,7 @@ func TestRunHeartbeatsFetchesConfigAndReactsToRealtime(t *testing.T) {
 	}
 
 	// config.updated fetches the config (304 now).
-	realtime.onEvent(EventConfigUpdated)
+	realtime.onEvent(EventConfigUpdated, nil)
 	waitFor("/config")
 
 	// SIGHUP-style reload collects again; nothing changed, nothing sent.
@@ -962,6 +962,13 @@ func TestRunRequiresDependencies(t *testing.T) {
 type fakeMetrics struct {
 	mu      sync.Mutex
 	configs []*MetricsConfig
+	live    []time.Time
+}
+
+func (metrics *fakeMetrics) Live(until time.Time) {
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	metrics.live = append(metrics.live, until)
 }
 
 func (metrics *fakeMetrics) Configure(config *MetricsConfig) {

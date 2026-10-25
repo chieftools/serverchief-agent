@@ -141,6 +141,7 @@ the systemd unit does not restart.`,
 				UserAgent:  agent.UserAgent(version, identity.ServerID),
 				HTTP:       httpClient,
 			})
+			sampler.ReadLive = host.ReadLiveUsage
 			go sampler.Run(ctx)
 			reload := make(chan agent.Config)
 			stopReload := watchReload(ctx, *configPath, logWriter, reload)
