@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.2.1]
+
 ### Fixed
 
 - Apache sites are listed again on servers whose Apache configuration opens files for writing while it is read, such as ModSecurity's `SecAuditLog`. The unprivileged agent cannot run `apachectl -S` there, so it asks the root helper, which has a new `apache-vhosts` action.
@@ -46,7 +48,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.1
 [0.2.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.0
 [0.1.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.1.1
 [0.1.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.1.0
