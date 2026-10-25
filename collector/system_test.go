@@ -275,6 +275,14 @@ func TestVirtualizationDetection(t *testing.T) {
 			want: Virtualization{Role: "container", Technology: "lxc", Vendor: "Dell Inc."},
 		},
 		{
+			name: "lxc with lxcfs over /proc",
+			fsys: fstest.MapFS{
+				"proc/1/environ":      &fstest.MapFile{Data: []byte("container=lxc\x00")},
+				"proc/self/mountinfo": &fstest.MapFile{Data: []byte("1112 1101 0:50 /proc/cpuinfo /proc/cpuinfo rw,nosuid,nodev,relatime shared:463 - fuse.lxcfs lxcfs rw,user_id=0,group_id=0,allow_other\n1113 1101 0:50 /proc/meminfo /proc/meminfo rw,nosuid,nodev,relatime shared:463 - fuse.lxcfs lxcfs rw,user_id=0,group_id=0,allow_other\n")},
+			},
+			want: Virtualization{Role: "container", Technology: "lxc", Lxcfs: true},
+		},
+		{
 			name: "openvz",
 			fsys: fstest.MapFS{"proc/vz/veinfo": &fstest.MapFile{Data: []byte("")}},
 			want: Virtualization{Role: "container", Technology: "openvz"},

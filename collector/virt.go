@@ -2,6 +2,7 @@ package collector
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 )
 
@@ -17,6 +18,10 @@ type Virtualization struct {
 	// bare metal ("Dell Inc." / "PowerEdge R640", "Hetzner" / "vServer").
 	Vendor  string `json:"vendor"`
 	Product string `json:"product"`
+	// Lxcfs is true in a container whose /proc/meminfo comes from lxcfs,
+	// which shows the container's own memory, CPU time and load. Without
+	// it, a container's /proc shows those of the host.
+	Lxcfs bool `json:"lxcfs"`
 }
 
 type dmiRule struct {
@@ -54,6 +59,7 @@ func (host *Host) detectVirtualization(cpuFlags []string) Virtualization {
 	if technology := host.detectContainer(); technology != "" {
 		virtualization.Role = "container"
 		virtualization.Technology = technology
+		virtualization.Lxcfs = host.procFromLxcfs()
 		return virtualization
 	}
 	technology := host.detectVM(virtualization.Vendor, virtualization.Product, cpuFlags)
@@ -158,4 +164,22 @@ func (host *Host) detectVM(vendor, product string, cpuFlags []string) string {
 		}
 	}
 	return ""
+}
+
+// procFromLxcfs reports whether lxcfs is mounted over /proc/meminfo.
+func (host *Host) procFromLxcfs() bool {
+	data, err := host.readFile("/proc/self/mountinfo")
+	if err != nil {
+		return false
+	}
+	for _, line := range lines(data) {
+		fields := strings.Fields(line)
+		// The mount point is the fifth field, the type follows the "-".
+		separator := slices.Index(fields, "-")
+		if len(fields) > 4 && separator > 4 && len(fields) > separator+1 &&
+			unescapeMount(fields[4]) == "/proc/meminfo" && strings.HasPrefix(fields[separator+1], "fuse.lxcfs") {
+			return true
+		}
+	}
+	return false
 }
