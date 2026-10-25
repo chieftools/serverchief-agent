@@ -155,6 +155,8 @@ type EnrollmentResponse struct {
 	Realtime         *Realtime       `json:"realtime"`
 	// PackageMetadataRefresh is optional here; GET /config carries it.
 	PackageMetadataRefresh *PackageMetadataRefresh `json:"package_metadata_refresh,omitempty"`
+	// Metrics is absent from backends without a metrics gateway.
+	Metrics *MetricsConfig `json:"metrics,omitempty"`
 }
 
 // ServerConfig returns the configuration embedded in the response.
@@ -166,6 +168,7 @@ func (response EnrollmentResponse) ServerConfig() ServerConfig {
 		Realtime:  response.Realtime,
 
 		PackageMetadataRefresh: response.PackageMetadataRefresh,
+		Metrics:                response.Metrics,
 	}
 }
 
@@ -178,8 +181,8 @@ type ServerConfig struct {
 	Realtime *Realtime `json:"realtime"`
 	// PackageMetadataRefresh is absent (nil) for "enabled every 6 hours".
 	PackageMetadataRefresh *PackageMetadataRefresh `json:"package_metadata_refresh,omitempty"`
-	// Metrics is absent (nil) from backends before protocol 1.2.0, which
-	// means no metrics.
+	// Metrics is absent (nil) without a metrics gateway, which means no
+	// metrics.
 	Metrics *MetricsConfig `json:"metrics,omitempty"`
 }
 

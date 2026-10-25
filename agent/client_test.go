@@ -90,6 +90,9 @@ func TestResponseFixturesDecode(t *testing.T) {
 		config.Intervals.Datasets["hardware"] != 3600 || config.Realtime == nil || config.Realtime.Port != 443 {
 		t.Fatalf("enroll response = %+v", enrollment)
 	}
+	if config.Metrics == nil || *config.Metrics != (MetricsConfig{Enabled: true, Endpoint: "https://metrics.server.chief.test", Interval: 60}) {
+		t.Fatalf("enroll response metrics = %+v", config.Metrics)
+	}
 
 	var server ServerConfig
 	if err := json.Unmarshal(readFixture(t, "config-response.json"), &server); err != nil {

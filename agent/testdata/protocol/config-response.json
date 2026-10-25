@@ -27,6 +27,11 @@
     },
     "heartbeat": 300
   },
+  "metrics": {
+    "enabled": true,
+    "endpoint": "https://metrics.server.chief.test",
+    "interval": 60
+  },
   "package_metadata_refresh": {
     "enabled": true,
     "interval": 21600

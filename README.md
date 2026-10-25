@@ -127,7 +127,7 @@ State lives in `/var/lib/serverchief`: `state.json` (seq, acknowledged seq and h
 
 ### Metrics
 
-When the backend's configuration turns metrics on (`metrics: {enabled, endpoint, interval}`, protocol 1.2.0), the daemon also samples host usage every interval (60 s by default) and delivers it to the metrics gateway, following the metrics protocol (`serverchief/protocol/metrics/v1`). Sampling runs next to the inventory loop, so a slow collection never delays it.
+When the backend's configuration turns metrics on (`metrics: {enabled, endpoint, interval}`, protocol 1.1.0), the daemon also samples host usage every interval (60 s by default) and delivers it to the metrics gateway, following the metrics protocol (`serverchief/protocol/metrics/v1`). Sampling runs next to the inventory loop, so a slow collection never delays it.
 
 - **What:** CPU time shares, load, processes, memory, swap, per-file-system usage and inodes, per-disk throughput, IOPS and utilisation, per-interface traffic, packets, errors and drops, TCP connections and uptime, all from `/proc` and `statfs`; nothing needs root. Rates cover the interval before the sample, and a counter that went backwards (a reboot, a recreated interface) leaves its rates out once. Disks, file systems and interfaces follow the inventory's exclusions (no loop, ram or zram devices, empty optical drives, bind mounts of the same device, or container plumbing such as `veth*`, `docker*` and `br-*`), with at most 64 of each.
 - **When:** samples are taken on interval boundaries (`at % interval == 0`), so a fleet lines up, and each agent sends a random 0–30 s after the boundary, so a fleet does not arrive at once.
