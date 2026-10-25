@@ -20,6 +20,7 @@ release.
 - The agent no longer runs as root. Under systemd 229 and later it runs as the `serverchief` user with read-only access to the server (`CAP_DAC_READ_SEARCH`), and a root helper with a fixed list of actions refreshes package lists, reads Plesk sites and installs agent updates for it. Older systemd and SysV keep running the agent as root. Updating from 0.1 switches to the `serverchief` user once the update is done. See [Privileges](README.md#privileges).
 - Every heartbeat reports how the agent runs, so Server Chief shows it and records a change of privileges. The protocol revision is 1.1.0.
 - A symbolic link inside a hosting user's directory is only followed when it stays inside that directory, for every file the agent reads, and every file is read up to a size cap.
+- `install.sh` falls back to HTTP for the apt repository when apt cannot reach it over HTTPS, as on Ubuntu 14.04, whose apt lacks the TLS ciphers of the package host. apt still checks the repository's signatures.
 
 ## [0.1.1]
 

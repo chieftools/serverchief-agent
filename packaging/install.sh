@@ -72,36 +72,17 @@ dearmor() {
     ' | base64 -d
 }
 
-install_apt() {
-    echo "Setting up the Server Chief repository for Debian/Ubuntu..."
-
-    APT_VERSION="$(dpkg-query -W -f='${Version}' apt 2>/dev/null || true)"
-
-    # apt before 1.5 needs apt-transport-https for HTTPS repositories.
-    if [ "${PACKAGE_BASE_URL#https:}" != "${PACKAGE_BASE_URL}" ] && [ ! -e /usr/lib/apt/methods/https ]; then
-        echo "Installing apt-transport-https..."
-        if ! apt-get update; then
-            echo "apt-get update reported errors; continuing because unrelated repositories may be broken."
-        fi
-        DEBIAN_FRONTEND=noninteractive apt-get install -y apt-transport-https ca-certificates
-    fi
-
-    # Add GPG key
-    install -d -m 0755 /etc/apt/keyrings
-    curl -fsSL "${PACKAGE_BASE_URL}/gpg.key" | dearmor > "${KEYRING}.tmp"
-    if [ ! -s "${KEYRING}.tmp" ]; then
-        rm -f "${KEYRING}.tmp"
-        fail "could not download the repository signing key."
-    fi
-    chmod 0644 "${KEYRING}.tmp"
-    mv -f "${KEYRING}.tmp" "${KEYRING}"
+# Write the repository source for apt: deb822 with signed-by from apt 1.1,
+# a one-line .list with the key in trusted.gpg.d before that.
+write_apt_source() {
+    local url="$1"
 
     if dpkg --compare-versions "${APT_VERSION:-0}" ge 1.1; then
         # Add repository using deb822 format, trusting the key for it only
         rm -f "${APT_LIST}" "${LEGACY_KEYRING}"
         printf '%s\n' \
             'Types: deb' \
-            "URIs: ${PACKAGE_BASE_URL}/deb" \
+            "URIs: ${url}/deb" \
             'Suites: stable' \
             'Components: main' \
             "Architectures: ${DEB_ARCH}" \
@@ -114,16 +95,71 @@ install_apt() {
         # update itself with this apt (it needs 1.1 or later).
         rm -f "${APT_SOURCES}"
         install -m 0644 "${KEYRING}" "${LEGACY_KEYRING}"
-        printf 'deb [arch=%s] %s/deb stable main\n' "${DEB_ARCH}" "${PACKAGE_BASE_URL}" > "${APT_LIST}"
+        printf 'deb [arch=%s] %s/deb stable main\n' "${DEB_ARCH}" "${url}" > "${APT_LIST}"
         SOURCES="${APT_LIST}"
     fi
+}
 
-    # Refresh the Server Chief repository only, the way the agent's updater
-    # does, so unrelated broken repositories cannot get in the way.
+# Refresh the Server Chief repository only, the way the agent's updater
+# does, so unrelated broken repositories cannot get in the way. Succeeds
+# when apt then offers the serverchief package.
+refresh_apt_source() {
     apt-get update \
         -o Dir::Etc::sourcelist="${SOURCES}" \
         -o Dir::Etc::sourceparts=- \
-        -o APT::Get::List-Cleanup=0
+        -o APT::Get::List-Cleanup=0 || true
+
+    local candidate
+    candidate="$(apt-cache policy serverchief 2>/dev/null | awk '/Candidate:/ { print $2 }')"
+    [ -n "${candidate}" ] && [ "${candidate}" != "(none)" ]
+}
+
+install_apt() {
+    echo "Setting up the Server Chief repository for Debian/Ubuntu..."
+
+    APT_VERSION="$(dpkg-query -W -f='${Version}' apt 2>/dev/null || true)"
+    REPOSITORY_URL="${PACKAGE_BASE_URL}"
+
+    # apt before 1.5 needs apt-transport-https for HTTPS repositories.
+    if [ "${REPOSITORY_URL#https:}" != "${REPOSITORY_URL}" ] && [ ! -e /usr/lib/apt/methods/https ]; then
+        echo "Installing apt-transport-https..."
+        if ! apt-get update; then
+            echo "apt-get update reported errors; continuing because unrelated repositories may be broken."
+        fi
+        if ! DEBIAN_FRONTEND=noninteractive apt-get install -y apt-transport-https ca-certificates; then
+            echo "Could not install apt-transport-https; apt will use the repository over HTTP."
+            REPOSITORY_URL="http://${PACKAGE_BASE_URL#https://}"
+        fi
+    fi
+
+    # Add GPG key. curl brings its own TLS, which works where apt's may not.
+    install -d -m 0755 /etc/apt/keyrings
+    curl -fsSL "${PACKAGE_BASE_URL}/gpg.key" | dearmor > "${KEYRING}.tmp"
+    if [ ! -s "${KEYRING}.tmp" ]; then
+        rm -f "${KEYRING}.tmp"
+        fail "could not download the repository signing key."
+    fi
+    chmod 0644 "${KEYRING}.tmp"
+    mv -f "${KEYRING}.tmp" "${KEYRING}"
+
+    write_apt_source "${REPOSITORY_URL}"
+
+    if ! refresh_apt_source; then
+        if [ "${REPOSITORY_URL#https:}" = "${REPOSITORY_URL}" ]; then
+            fail "apt could not read the Server Chief repository at ${REPOSITORY_URL}."
+        fi
+
+        # apt's HTTPS can be too old for the repository host: Ubuntu 14.04's
+        # GnuTLS has none of its ciphers. The repository's metadata is signed
+        # and checked by apt, so HTTP only gives up privacy, not integrity.
+        echo "apt could not reach the Server Chief repository over HTTPS; using HTTP instead. Packages stay signature-checked."
+        REPOSITORY_URL="http://${PACKAGE_BASE_URL#https://}"
+        write_apt_source "${REPOSITORY_URL}"
+
+        if ! refresh_apt_source; then
+            fail "apt could not read the Server Chief repository over HTTPS or HTTP."
+        fi
+    fi
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y serverchief
 }
