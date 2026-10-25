@@ -185,3 +185,51 @@ func TestDerivedMetricsMatchTheProtocolFixture(t *testing.T) {
 		t.Errorf("re-encoded fixture differs:\n%s\n%s", leftJSON, rightJSON)
 	}
 }
+
+func TestDeriveHostTotalsCountUnderlyingDevicesOnly(t *testing.T) {
+	before := reading(time.Unix(1793001600, 0))
+	before.Disks = []collector.DiskCounters{
+		{Name: "sda", Underlying: true}, {Name: "sdb", Underlying: true}, {Name: "md0"}, {Name: "vg-root"},
+	}
+	before.Interfaces = []collector.InterfaceCounters{
+		{Name: "eth0", Underlying: true}, {Name: "eth1", Underlying: true}, {Name: "bond0"}, {Name: "bond0.100"},
+	}
+	after := reading(time.Unix(1793001660, 0))
+	// RAID 1 of sda and sdb with LVM on top: 60 MB written to vg-root lands on md0 and on both disks
+	after.Disks = []collector.DiskCounters{
+		{Name: "sda", Writes: 600, WriteSectors: 117_187, IOMillis: 30_000, Underlying: true},
+		{Name: "sdb", Writes: 600, WriteSectors: 117_187, IOMillis: 45_000, Underlying: true},
+		{Name: "md0", Writes: 600, WriteSectors: 117_187, IOMillis: 50_000},
+		{Name: "vg-root", Writes: 600, WriteSectors: 117_187, IOMillis: 55_000},
+	}
+	// A bond of eth0 and eth1 with a VLAN on it: 6 MB received, split over the NICs
+	after.Interfaces = []collector.InterfaceCounters{
+		{Name: "eth0", RxBytes: 4_000_000, RxPackets: 400, Underlying: true},
+		{Name: "eth1", RxBytes: 2_000_000, RxPackets: 200, Underlying: true},
+		{Name: "bond0", RxBytes: 6_000_000, RxPackets: 600},
+		{Name: "bond0.100", RxBytes: 6_000_000, RxPackets: 600},
+	}
+
+	got := values(Derive(&before, after))
+	for key, want := range map[[2]string]float64{
+		{"net.rx_bps", ""}:             100_000, // eth0 + eth1, not the bond or VLAN again
+		{"net.rx_pps", ""}:             10,
+		{"net.rx_bps", "bond0"}:        100_000,
+		{"disk.write_iops", ""}:        20, // both mirrors, not md0 or LVM again
+		{"disk.util_pct", ""}:          75, // the busiest disk
+		{"disk.write_iops", "vg-root"}: 10,
+	} {
+		if got[key] != want {
+			t.Errorf("%v = %v, want %v", key, got[key], want)
+		}
+	}
+}
+
+func TestDeriveLeavesTotalsOutWithoutRates(t *testing.T) {
+	got := values(Derive(nil, reading(time.Unix(1793001600, 0))))
+	for _, key := range [][2]string{{"net.rx_bps", ""}, {"disk.util_pct", ""}} {
+		if _, ok := got[key]; ok {
+			t.Errorf("%v present without a previous reading", key)
+		}
+	}
+}

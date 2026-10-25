@@ -1,7 +1,9 @@
 package metrics
 
 import (
+	"maps"
 	"math"
+	"slices"
 
 	"go.chief.tools/serverchief-agent/collector"
 )
@@ -78,6 +80,15 @@ func Derive(previous *collector.Usage, current collector.Usage) []Point {
 	}
 
 	if rates {
+		// Host totals (instance "") add up the underlying devices only, so a
+		// disk below LVM or RAID, or a NIC below a bond, bridge or VLAN, is
+		// not counted twice; utilisation is that of the busiest disk.
+		diskTotals := map[string]float64{}
+		netTotals := map[string]float64{}
+		total := func(totals map[string]float64, metric string, value float64) {
+			totals[metric] += value
+		}
+
 		disks := make(map[string]collector.DiskCounters, len(previous.Disks))
 		for _, disk := range previous.Disks {
 			disks[disk.Name] = disk
@@ -87,11 +98,23 @@ func Derive(previous *collector.Usage, current collector.Usage) []Point {
 			if !ok || !grew(diskCounters(before), diskCounters(disk)) {
 				continue
 			}
-			add("disk.read_bps", disk.Name, rate(float64((disk.ReadSectors-before.ReadSectors)*sectorBytes), elapsed))
-			add("disk.write_bps", disk.Name, rate(float64((disk.WriteSectors-before.WriteSectors)*sectorBytes), elapsed))
-			add("disk.read_iops", disk.Name, rate(float64(disk.Reads-before.Reads), elapsed))
-			add("disk.write_iops", disk.Name, rate(float64(disk.Writes-before.Writes), elapsed))
-			add("disk.util_pct", disk.Name, math.Min(100, percent(float64(disk.IOMillis-before.IOMillis), elapsed*1000)))
+			values := []measurement{
+				{"disk.read_bps", rate(float64((disk.ReadSectors-before.ReadSectors)*sectorBytes), elapsed)},
+				{"disk.write_bps", rate(float64((disk.WriteSectors-before.WriteSectors)*sectorBytes), elapsed)},
+				{"disk.read_iops", rate(float64(disk.Reads-before.Reads), elapsed)},
+				{"disk.write_iops", rate(float64(disk.Writes-before.Writes), elapsed)},
+			}
+			utilization := math.Min(100, percent(float64(disk.IOMillis-before.IOMillis), elapsed*1000))
+			for _, value := range values {
+				add(value.metric, disk.Name, value.value)
+				if disk.Underlying {
+					total(diskTotals, value.metric, value.value)
+				}
+			}
+			add("disk.util_pct", disk.Name, utilization)
+			if disk.Underlying {
+				diskTotals["disk.util_pct"] = math.Max(diskTotals["disk.util_pct"], utilization)
+			}
 		}
 
 		interfaces := make(map[string]collector.InterfaceCounters, len(previous.Interfaces))
@@ -103,12 +126,26 @@ func Derive(previous *collector.Usage, current collector.Usage) []Point {
 			if !ok || !grew(interfaceCounters(before), interfaceCounters(counters)) {
 				continue
 			}
-			add("net.rx_bps", counters.Name, rate(float64(counters.RxBytes-before.RxBytes), elapsed))
-			add("net.tx_bps", counters.Name, rate(float64(counters.TxBytes-before.TxBytes), elapsed))
-			add("net.rx_pps", counters.Name, rate(float64(counters.RxPackets-before.RxPackets), elapsed))
-			add("net.tx_pps", counters.Name, rate(float64(counters.TxPackets-before.TxPackets), elapsed))
-			add("net.errors", counters.Name, rate(float64(counters.Errors-before.Errors), elapsed))
-			add("net.drops", counters.Name, rate(float64(counters.Drops-before.Drops), elapsed))
+			values := []measurement{
+				{"net.rx_bps", rate(float64(counters.RxBytes-before.RxBytes), elapsed)},
+				{"net.tx_bps", rate(float64(counters.TxBytes-before.TxBytes), elapsed)},
+				{"net.rx_pps", rate(float64(counters.RxPackets-before.RxPackets), elapsed)},
+				{"net.tx_pps", rate(float64(counters.TxPackets-before.TxPackets), elapsed)},
+				{"net.errors", rate(float64(counters.Errors-before.Errors), elapsed)},
+				{"net.drops", rate(float64(counters.Drops-before.Drops), elapsed)},
+			}
+			for _, value := range values {
+				add(value.metric, counters.Name, value.value)
+				if counters.Underlying {
+					total(netTotals, value.metric, value.value)
+				}
+			}
+		}
+
+		for _, totals := range []map[string]float64{diskTotals, netTotals} {
+			for _, metric := range slices.Sorted(maps.Keys(totals)) {
+				add(metric, "", round(totals[metric]))
+			}
 		}
 	}
 
@@ -121,6 +158,11 @@ func Derive(previous *collector.Usage, current collector.Usage) []Point {
 	}
 
 	return points
+}
+
+type measurement struct {
+	metric string
+	value  float64
 }
 
 // grew reports whether no counter of a group went backwards.

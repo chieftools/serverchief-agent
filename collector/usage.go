@@ -76,6 +76,10 @@ type DiskCounters struct {
 	WriteSectors uint64
 	// IOMillis is the time the device had I/O in flight.
 	IOMillis uint64
+	// Underlying is true for a disk with no other block device beneath it.
+	// Device-mapper (LVM) and md (RAID) devices are not: their I/O also
+	// shows on the disks they are built on, so host totals leave them out.
+	Underlying bool
 }
 
 // InterfaceCounters are /proc/net/dev counters of one interface.
@@ -88,6 +92,12 @@ type InterfaceCounters struct {
 	// Errors and Drops add the receive and transmit directions.
 	Errors uint64
 	Drops  uint64
+	// Underlying is true for an interface whose traffic counts towards the
+	// host's total: one backed by a (virtual) network device. Bonds,
+	// bridges, VLANs and tunnels carry traffic that also crosses such a
+	// device. In a container without devices it is every interface not
+	// stacked on another.
+	Underlying bool
 }
 
 // MaximumInstances caps each group of per-instance usage (file systems,
@@ -114,7 +124,7 @@ func (host *Host) ReadUsage() Usage {
 	usage.Filesystems = host.readFilesystemUsage()
 	usage.Disks = host.readDiskCounters()
 	if data, err := host.readFile("/proc/net/dev"); err == nil {
-		usage.Interfaces = parseNetDev(data)
+		usage.Interfaces = host.markUnderlyingInterfaces(parseNetDev(data))
 	}
 	if data, err := host.readFile("/proc/net/snmp"); err == nil {
 		if established, ok := parseTCPEstablished(data); ok {
@@ -268,6 +278,10 @@ func (host *Host) readDiskCounters() []DiskCounters {
 			return value
 		}
 		name := fields[2]
+		underlying := true
+		if slaves, err := host.readDir("/sys/block/" + name + "/slaves"); err == nil && len(slaves) > 0 {
+			underlying = false
+		}
 		if strings.HasPrefix(name, "dm-") {
 			if mapped := host.readOptional("/sys/block/" + name + "/dm/name"); mapped != "" {
 				name = mapped
@@ -280,6 +294,7 @@ func (host *Host) readDiskCounters() []DiskCounters {
 			Writes:       number(7),
 			WriteSectors: number(9),
 			IOMillis:     number(12),
+			Underlying:   underlying,
 		})
 	}
 	slices.SortFunc(result, func(a, b DiskCounters) int { return strings.Compare(a.Name, b.Name) })
@@ -320,6 +335,30 @@ func parseNetDev(data []byte) []InterfaceCounters {
 		result = result[:MaximumInstances]
 	}
 	return result
+}
+
+// markUnderlyingInterfaces marks the interfaces backed by a device, or,
+// when none is (a container's veth), those not stacked on another.
+func (host *Host) markUnderlyingInterfaces(interfaces []InterfaceCounters) []InterfaceCounters {
+	backed := false
+	for index := range interfaces {
+		interfaces[index].Underlying = host.exists("/sys/class/net/" + interfaces[index].Name + "/device")
+		backed = backed || interfaces[index].Underlying
+	}
+	if backed {
+		return interfaces
+	}
+	for index := range interfaces {
+		interfaces[index].Underlying = true
+		entries, _ := host.readDir("/sys/class/net/" + interfaces[index].Name)
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), "lower_") {
+				interfaces[index].Underlying = false
+				break
+			}
+		}
+	}
+	return interfaces
 }
 
 // parseTCPEstablished reads CurrEstab from the Tcp lines of /proc/net/snmp,

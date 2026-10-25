@@ -50,18 +50,27 @@ fileserver.example.invalid:/export /mnt/share nfs4 rw 0 0
  253       0 dm-0 50 0 400 10 60 0 480 20 0 30 30 0 0 0 0
   11       0 sr0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
 `),
-		"sys/block/vda/size":     file("167772160\n"),
-		"sys/block/loop0/size":   file("0\n"),
-		"sys/block/sr0/size":     file("0\n"),
-		"sys/block/dm-0/size":    file("2097152\n"),
-		"sys/block/dm-0/dm/name": file("vg-data\n"),
+		"sys/block/vda/size":         file("167772160\n"),
+		"sys/block/loop0/size":       file("0\n"),
+		"sys/block/sr0/size":         file("0\n"),
+		"sys/block/dm-0/size":        file("2097152\n"),
+		"sys/block/dm-0/dm/name":     file("vg-data\n"),
+		"sys/block/dm-0/slaves/vda1": file(""),
 		"proc/net/dev": file(`Inter-|   Receive                                                |  Transmit
  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
     lo:  123456     100    0    0    0     0          0         0   123456     100    0    0    0     0       0          0
   eth0: 9000000   12000    1    2    0     0          0         0  4000000    9000    3    4    0     0       0          0
+  eth1: 7000000   10000    0    0    0     0          0         0  3000000    8000    0    0    0     0       0          0
+ bond0: 7000000   10000    0    0    0     0          0         0  3000000    8000    0    0    0     0       0          0
+eth0.100: 1000     10    0    0    0     0          0         0     1000      10    0    0    0     0       0          0
 veth1a2b: 500      5    0    0    0     0          0         0      500       5    0    0    0     0       0          0
 docker0:  700      7    0    0    0     0          0         0      700       7    0    0    0     0       0          0
 `),
+		"sys/class/net/eth0/device":         file(""),
+		"sys/class/net/eth1/device":         file(""),
+		"sys/class/net/eth1/master":         file(""),
+		"sys/class/net/bond0/lower_eth1":    file(""),
+		"sys/class/net/eth0.100/lower_eth0": file(""),
 		"proc/net/snmp": file(`Ip: Forwarding DefaultTTL
 Ip: 1 64
 Tcp: RtoAlgorithm RtoMin RtoMax MaxConn ActiveOpens PassiveOpens AttemptFails EstabResets CurrEstab InSegs
@@ -118,16 +127,24 @@ func TestReadUsage(t *testing.T) {
 	}
 
 	wantDisks := []DiskCounters{
-		{Name: "vda", Reads: 2000, ReadSectors: 40000, Writes: 5000, WriteSectors: 120000, IOMillis: 3000},
+		{Name: "vda", Reads: 2000, ReadSectors: 40000, Writes: 5000, WriteSectors: 120000, IOMillis: 3000, Underlying: true},
+		// LVM on vda1: its I/O shows on vda too
 		{Name: "vg-data", Reads: 50, ReadSectors: 400, Writes: 60, WriteSectors: 480, IOMillis: 30},
 	}
 	if !reflect.DeepEqual(usage.Disks, wantDisks) {
 		t.Errorf("disks = %+v (loop devices, empty optical drives and partitions must be skipped)", usage.Disks)
 	}
 
-	wantInterfaces := []InterfaceCounters{{Name: "eth0", RxBytes: 9000000, TxBytes: 4000000, RxPackets: 12000, TxPackets: 9000, Errors: 4, Drops: 6}}
-	if !reflect.DeepEqual(usage.Interfaces, wantInterfaces) {
-		t.Errorf("interfaces = %+v (lo, veth and docker must be skipped)", usage.Interfaces)
+	underlying := map[string]bool{}
+	for _, counters := range usage.Interfaces {
+		underlying[counters.Name] = counters.Underlying
+	}
+	// The bond and the VLAN carry traffic of the NICs below them
+	if !reflect.DeepEqual(underlying, map[string]bool{"bond0": false, "eth0": true, "eth0.100": false, "eth1": true}) {
+		t.Errorf("interfaces = %v (lo, veth and docker must be skipped)", underlying)
+	}
+	if eth0 := usage.Interfaces[1]; eth0 != (InterfaceCounters{Name: "eth0", RxBytes: 9000000, TxBytes: 4000000, RxPackets: 12000, TxPackets: 9000, Errors: 4, Drops: 6, Underlying: true}) {
+		t.Errorf("eth0 = %+v", eth0)
 	}
 
 	if !usage.HasTCP || usage.TCPEstablished != 42 || usage.TCPTimeWait != 17 || usage.Uptime != 864000.25 {
@@ -135,6 +152,22 @@ func TestReadUsage(t *testing.T) {
 	}
 	if !usage.At.Equal(time.Unix(1793001600, 0)) {
 		t.Errorf("at = %v", usage.At)
+	}
+}
+
+func TestReadUsageCountsInterfacesNotStackedOnOthersInAContainer(t *testing.T) {
+	host := usageHost()
+	fs := host.FS.(fstest.MapFS)
+	for _, name := range []string{"sys/class/net/eth0/device", "sys/class/net/eth1/device"} {
+		delete(fs, name)
+	}
+
+	underlying := map[string]bool{}
+	for _, counters := range host.ReadUsage().Interfaces {
+		underlying[counters.Name] = counters.Underlying
+	}
+	if !reflect.DeepEqual(underlying, map[string]bool{"bond0": false, "eth0": true, "eth0.100": false, "eth1": true}) {
+		t.Fatalf("interfaces = %v", underlying)
 	}
 }
 
