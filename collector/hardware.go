@@ -309,6 +309,26 @@ func unescapeMount(value string) string {
 }
 
 func (host *Host) readFilesystems() []Filesystem {
+	filesystems := host.readMountedFilesystems()
+	if host.Statfs == nil {
+		return filesystems
+	}
+	for index := range filesystems {
+		// statfs on a hung network mount blocks; capacities of remote file
+		// systems are not inventory anyway.
+		if filesystems[index].Network {
+			continue
+		}
+		if stats, err := host.Statfs(filesystems[index].MountPoint); err == nil {
+			filesystems[index].SizeBytes = stats.SizeBytes
+		}
+	}
+	return filesystems
+}
+
+// readMountedFilesystems lists the mounted file systems the inventory
+// covers, without their sizes.
+func (host *Host) readMountedFilesystems() []Filesystem {
 	data, err := host.readFile("/proc/mounts")
 	if err != nil {
 		if data, err = host.readFile("/proc/self/mounts"); err != nil {
@@ -324,19 +344,6 @@ func (host *Host) readFilesystems() []Filesystem {
 			continue
 		}
 		filesystems = append(filesystems, filesystem)
-	}
-	if host.Statfs == nil {
-		return filesystems
-	}
-	for index := range filesystems {
-		// statfs on a hung network mount blocks; capacities of remote file
-		// systems are not inventory anyway.
-		if filesystems[index].Network {
-			continue
-		}
-		if stats, err := host.Statfs(filesystems[index].MountPoint); err == nil {
-			filesystems[index].SizeBytes = stats.SizeBytes
-		}
 	}
 	return filesystems
 }

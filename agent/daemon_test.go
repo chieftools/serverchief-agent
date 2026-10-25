@@ -958,3 +958,59 @@ func TestRunRequiresDependencies(t *testing.T) {
 		t.Fatal("Run() without dependencies succeeded")
 	}
 }
+
+type fakeMetrics struct {
+	mu      sync.Mutex
+	configs []*MetricsConfig
+}
+
+func (metrics *fakeMetrics) Configure(config *MetricsConfig) {
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	metrics.configs = append(metrics.configs, config)
+}
+
+func (metrics *fakeMetrics) Status() MetricsCapability {
+	return MetricsCapability{Enabled: true, SpoolBytes: 42}
+}
+
+func TestMetricsFollowTheServerConfigAndReportInHeartbeats(t *testing.T) {
+	server := newProtocolServer(t)
+	setup := newTestSetup(t, &fakeCollector{name: "system", data: "a"})
+	options := setup.options(t, server.client())
+	metrics := &fakeMetrics{}
+	options.Metrics = metrics
+
+	server.mu.Lock()
+	server.config.ETag = `"c2"`
+	server.config.Metrics = &MetricsConfig{Enabled: true, Endpoint: "https://metrics.example.invalid", Interval: 60}
+	server.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, options) }()
+	deadline := time.After(5 * time.Second)
+	for configured := false; !configured; {
+		select {
+		case <-server.events:
+			metrics.mu.Lock()
+			configured = len(metrics.configs) == 2
+			metrics.mu.Unlock()
+		case <-deadline:
+			t.Fatal("timed out waiting for the fetched config")
+		}
+	}
+	cancel()
+	<-done
+
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	if metrics.configs[0] != nil || *metrics.configs[1] != *server.config.Metrics {
+		t.Fatalf("configs = %v then %+v; want the cached config without metrics, then the fetched one", metrics.configs[0], metrics.configs[1])
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if capability := server.heartbeats[0].Capabilities.Metrics; capability == nil || !capability.Enabled || capability.SpoolBytes != 42 {
+		t.Fatalf("heartbeat metrics capability = %+v", capability)
+	}
+}

@@ -53,6 +53,8 @@ type Paths struct {
 	// Updates holds the agent update's request, state, readiness and
 	// result files (updater.Store).
 	Updates string
+	// Metrics is the metrics spool: samples waiting for the gateway.
+	Metrics string
 	// Log is the file log used on hosts without journald.
 	Log string
 }
@@ -74,6 +76,7 @@ func DefaultPaths() Paths {
 
 		MetadataRefresh: "/var/lib/serverchief/metadata-refresh.json",
 		Updates:         "/var/lib/serverchief",
+		Metrics:         "/var/lib/serverchief/metrics",
 		Log:             "/var/log/serverchief/agent.log",
 	}
 }
@@ -87,6 +90,7 @@ func (paths Paths) WithStateDirectory(directory string) Paths {
 	paths.Commands = filepath.Join(directory, "commands.json")
 	paths.MetadataRefresh = filepath.Join(directory, "metadata-refresh.json")
 	paths.Updates = directory
+	paths.Metrics = filepath.Join(directory, "metrics")
 	return paths
 }
 
@@ -174,6 +178,20 @@ type ServerConfig struct {
 	Realtime *Realtime `json:"realtime"`
 	// PackageMetadataRefresh is absent (nil) for "enabled every 6 hours".
 	PackageMetadataRefresh *PackageMetadataRefresh `json:"package_metadata_refresh,omitempty"`
+	// Metrics is absent (nil) from backends before protocol 1.2.0, which
+	// means no metrics.
+	Metrics *MetricsConfig `json:"metrics,omitempty"`
+}
+
+// MetricsConfig says whether and where the agent sends host metrics
+// (metrics protocol v1).
+type MetricsConfig struct {
+	Enabled bool `json:"enabled"`
+	// Endpoint is the metrics gateway's origin, such as
+	// https://metrics.server.chief.app.
+	Endpoint string `json:"endpoint"`
+	// Interval is in seconds; 0 means 60.
+	Interval int `json:"interval"`
 }
 
 // PackageMetadataRefresh configures the agent's own apt-get update /
@@ -217,6 +235,27 @@ type Capabilities struct {
 	AgentUpdate AgentUpdateCapability `json:"agent_update"`
 	// Privilege is how the agent runs; nil when the build does not tell.
 	Privilege *PrivilegeCapability `json:"privilege,omitempty"`
+	// Metrics reports delivery to the metrics gateway; nil when the build
+	// has no metrics.
+	Metrics *MetricsCapability `json:"metrics,omitempty"`
+}
+
+// MetricsCapability tells the backend whether samples arrive.
+type MetricsCapability struct {
+	Enabled bool `json:"enabled"`
+	// LastSentAt is the last batch the gateway stored, nil when none yet.
+	LastSentAt *time.Time `json:"last_sent_at"`
+	// SpoolBytes is what waits on disk for delivery.
+	SpoolBytes int64 `json:"spool_bytes"`
+	// Error is the last delivery failure, nil after a success.
+	Error *string `json:"error"`
+}
+
+// Metrics is the metrics runner as the daemon sees it: it hands over the
+// backend's setting and reports the runner's state with every heartbeat.
+type Metrics interface {
+	Configure(config *MetricsConfig)
+	Status() MetricsCapability
 }
 
 // AgentUpdateCapability tells the backend whether it may send

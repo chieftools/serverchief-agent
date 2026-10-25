@@ -71,6 +71,12 @@ Trimmed output from `debian:12` on arm64:
 }
 ```
 
+`serverchief sample` reads the host's usage twice, a second apart (`--over 10s` for longer), and prints the metrics sample the daemon would send. It also needs neither setup nor root.
+
+```bash
+serverchief sample --pretty
+```
+
 ### Set up
 
 ```bash
@@ -118,6 +124,16 @@ Every key in `/etc/serverchief/config.json` is optional. These operator override
 ```
 
 State lives in `/var/lib/serverchief`: `state.json` (seq, acknowledged seq and hashes, last reported errors), `server-config.json` (the backend configuration with its ETag), `payloads/` (delta bases), `metadata-refresh.json` (the last successful package metadata refresh) `commands.json` (recent commands with their state and result, kept 48 hours after their result was reported) and, while an agent update runs, `update-request.json`, `update-state.json`, `update-ready.json` and `update-result.json` (see *Agent updates*). Every file is mode 0600 and replaced atomically (temporary file, fsync, rename).
+
+### Metrics
+
+When the backend's configuration turns metrics on (`metrics: {enabled, endpoint, interval}`, protocol 1.2.0), the daemon also samples host usage every interval (60 s by default) and delivers it to the metrics gateway, following the metrics protocol (`serverchief/protocol/metrics/v1`). Sampling runs next to the inventory loop, so a slow collection never delays it.
+
+- **What:** CPU time shares, load, processes, memory, swap, per-file-system usage and inodes, per-disk throughput, IOPS and utilisation, per-interface traffic, packets, errors and drops, TCP connections and uptime, all from `/proc` and `statfs`; nothing needs root. Rates cover the interval before the sample, and a counter that went backwards (a reboot, a recreated interface) leaves its rates out once. Disks, file systems and interfaces follow the inventory's exclusions (no loop, ram or zram devices, empty optical drives, bind mounts of the same device, or container plumbing such as `veth*`, `docker*` and `br-*`), with at most 64 of each.
+- **When:** samples are taken on interval boundaries (`at % interval == 0`), so a fleet lines up, and each agent sends a random 0–30 s after the boundary, so a fleet does not arrive at once.
+- **Spool:** every sample is a file in `/var/lib/serverchief/metrics/samples` until the gateway stored it. Up to 60 samples go out as one batch, which is kept as `batch.json` and resent unchanged after an ambiguous failure, so the gateway stores it once. The spool keeps at most 24 hours and 8 MiB, dropping the oldest samples first.
+- **Failures:** a `401` waits 5 minutes (a just-enrolled server the panel has not published yet), `403 metrics_disabled` drops the spool and waits for a new configuration, `426` waits for a new configuration, `429` and `503` honour `Retry-After`, and other errors back off from 2 s to 5 minutes. A rejected batch (`400`, `413`, `415`, `422`) is dropped.
+- **Heartbeat:** `capabilities.metrics {enabled, last_sent_at, spool_bytes, error}` lets the panel show when samples stop arriving. Turning metrics off clears the spool.
 
 ### Privileges
 
@@ -230,12 +246,13 @@ Payloads hold only values that are stable while the server is unchanged: capacit
 
 ```
 main.go          signal handling, embedded fallback CA roots
-cmd/             cobra CLI: version, collect, run, setup, internal-update (hidden)
+cmd/             cobra CLI: version, collect, sample, run, setup, internal-update (hidden)
 collector/       Collector interface, registry and the built-in collectors, plus the package system for the daemon's metadata refresh
 pkglock/         read-only package-manager lock inspection (F_GETLK, PID files)
 trust/           trusted roots: the system pool plus the embedded Mozilla bundle
 updater/         agent self-updates: capability, request/state/result files, the internal-update helper
 inventory/       canonical JSON, SHA-256 hashes, envelope, keyed-list deltas, state store
+metrics/         host metrics: samples derived from collector.Usage, the on-disk spool and delivery to the metrics gateway
 agent/           protocol client, enrollment, daemon loop, settings, realtime glue
 initsys/         init system detection plus systemd and SysV service managers
 logging/         stdlib log setup and a size-capped rotating file writer

@@ -36,6 +36,10 @@ func systemStatfs(path string) (FSStats, error) {
 		return FSStats{}, err
 	}
 	return FSStats{
-		SizeBytes: uint64(stats.Blocks) * uint64(stats.Bsize),
+		SizeBytes:      uint64(stats.Blocks) * uint64(stats.Bsize),
+		FreeBytes:      uint64(stats.Bfree) * uint64(stats.Bsize),
+		AvailableBytes: uint64(stats.Bavail) * uint64(stats.Bsize),
+		Files:          stats.Files,
+		FilesFree:      stats.Ffree,
 	}, nil
 }

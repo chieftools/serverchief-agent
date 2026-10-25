@@ -9,6 +9,11 @@ release.
 
 ## [Unreleased]
 
+### Added
+
+- Added host metrics. When Server Chief turns them on, the agent samples CPU, load, memory, swap, file systems, disks, network, TCP connections and uptime every minute and sends them to the Server Chief metrics gateway. Samples wait in a spool of up to 24 hours while the gateway cannot be reached. See [Metrics](README.md#metrics).
+- Added `serverchief sample` to preview a metrics sample locally.
+
 ### Changed
 
 - The agent no longer runs as root. Under systemd 229 and later it runs as the `serverchief` user with read-only access to the server (`CAP_DAC_READ_SEARCH`), and a root helper with a fixed list of actions refreshes package lists, reads Plesk sites and installs agent updates for it. Older systemd and SysV keep running the agent as root. Updating from 0.1 switches to the `serverchief` user once the update is done. See [Privileges](README.md#privileges).

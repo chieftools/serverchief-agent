@@ -82,6 +82,10 @@ func (daemon *daemon) capabilities(ctx context.Context) *Capabilities {
 		privilege := probe.Capability(ctx)
 		result.Privilege = &privilege
 	}
+	if metrics := daemon.options.Metrics; metrics != nil {
+		status := metrics.Status()
+		result.Metrics = &status
+	}
 	return result
 }
 

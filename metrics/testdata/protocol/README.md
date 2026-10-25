@@ -1,0 +1,1 @@
+Copied verbatim from `serverchief/protocol/metrics/v1/fixtures/` (Server Chief metrics protocol v1, revision 1.0.0, serverchief commit 23380c2c), so the agent's tests do not depend on the sibling repository. Re-copy them when the spec changes. The data is fake.

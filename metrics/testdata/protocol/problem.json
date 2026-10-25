@@ -1,0 +1,6 @@
+{
+  "detail": "Metrics are turned off for this server.",
+  "status": 403,
+  "title": "Metrics disabled",
+  "type": "metrics_disabled"
+}

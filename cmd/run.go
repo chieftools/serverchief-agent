@@ -16,6 +16,7 @@ import (
 	"go.chief.tools/serverchief-agent/initsys"
 	"go.chief.tools/serverchief-agent/inventory"
 	"go.chief.tools/serverchief-agent/logging"
+	"go.chief.tools/serverchief-agent/metrics"
 	"go.chief.tools/serverchief-agent/systemdnotify"
 	"go.chief.tools/serverchief-agent/updater"
 )
@@ -135,6 +136,12 @@ the systemd unit does not restart.`,
 
 			ctx := command.Context()
 			watchPrivilegeTransition(ctx, updates)
+			sampler := metrics.NewRunner(host.ReadUsage, &metrics.Spool{Directory: paths.Metrics}, &metrics.Client{
+				Credential: identity.Credential,
+				UserAgent:  agent.UserAgent(version, identity.ServerID),
+				HTTP:       httpClient,
+			})
+			go sampler.Run(ctx)
 			reload := make(chan agent.Config)
 			stopReload := watchReload(ctx, *configPath, logWriter, reload)
 			defer stopReload()
@@ -160,6 +167,7 @@ the systemd unit does not restart.`,
 				RecordRefresh:  recordRefresh,
 				ChangePoll:     changePoll,
 				Updates:        updates,
+				Metrics:        sampler,
 				Ready: func() {
 					_ = systemdnotify.NotifyReady("collecting inventory")
 				},

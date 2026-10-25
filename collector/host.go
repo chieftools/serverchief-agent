@@ -34,9 +34,17 @@ type Uname struct {
 	Machine string
 }
 
-// FSStats holds the stable part of statfs(2) for one mount point.
+// FSStats holds statfs(2) for one mount point. Inventory uses only the
+// stable SizeBytes; the rest is usage for metrics.
 type FSStats struct {
 	SizeBytes uint64
+	// FreeBytes includes the blocks reserved for root; AvailableBytes is
+	// what unprivileged users can still write, as df reports.
+	FreeBytes      uint64
+	AvailableBytes uint64
+	// Files is the inode count, 0 for file systems without one.
+	Files     uint64
+	FilesFree uint64
 }
 
 // NetInterface is the subset of net.Interface plus addresses that the

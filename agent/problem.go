@@ -96,6 +96,12 @@ func decodeProblem(response *http.Response) *ProblemError {
 	return problem
 }
 
+// DecodeProblem is decodeProblem for other services that answer with the
+// same problem documents, such as the metrics gateway.
+func DecodeProblem(response *http.Response) *ProblemError {
+	return decodeProblem(response)
+}
+
 // parseRetryAfter accepts delay-seconds and HTTP-date forms.
 func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
 	value = strings.TrimSpace(value)

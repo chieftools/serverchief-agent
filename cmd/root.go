@@ -36,6 +36,7 @@ func NewRootCommand(version string) *cobra.Command {
 
 	root.AddCommand(newVersionCommand(version))
 	root.AddCommand(newCollectCommand())
+	root.AddCommand(newSampleCommand())
 	root.AddCommand(newRunCommand(version, &configPath))
 	root.AddCommand(newSetupCommand(version))
 	root.AddCommand(newInternalUpdateCommand())

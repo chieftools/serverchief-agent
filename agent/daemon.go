@@ -71,6 +71,9 @@ type RunOptions struct {
 	// Updates hands update_agent to the detached helper and reports the
 	// capability. Nil reports updates unavailable.
 	Updates *updater.Controller
+	// Metrics receives the backend's metrics setting. Nil leaves metrics
+	// out.
+	Metrics Metrics
 	// UpdatePoll is how often the helper's result is looked for (5 s).
 	UpdatePoll time.Duration
 	Now        func() time.Time
@@ -152,6 +155,9 @@ func Run(ctx context.Context, options RunOptions) error {
 	daemon := newDaemon(options)
 	defer daemon.closeRealtime()
 	daemon.updateRealtime(options.ServerConfig.Realtime)
+	if options.Metrics != nil {
+		options.Metrics.Configure(options.ServerConfig.Metrics)
+	}
 	return daemon.loop(ctx)
 }
 
@@ -518,6 +524,9 @@ func (daemon *daemon) applyConfig(config ServerConfig) {
 	daemon.reschedule(daemon.options.Now())
 	daemon.pruneWaiters()
 	daemon.updateRealtime(config.Realtime)
+	if daemon.options.Metrics != nil {
+		daemon.options.Metrics.Configure(config.Metrics)
+	}
 	log.Printf("[config] applied backend configuration %s: datasets %s, heartbeat %s",
 		config.ETag, strings.Join(config.Datasets, ", "), daemon.settings.Heartbeat())
 }
