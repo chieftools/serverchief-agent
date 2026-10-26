@@ -127,6 +127,8 @@ func pleskDomainsQuery(columns pleskColumns) (string, error) {
 		certificate,
 		certificateName,
 		certificateChain,
+		// A subdomain's parent; 0 for a domain.
+		column("domains", "parentdomainid", "d.parentDomainId"),
 	}
 	return "SELECT " + strings.Join(fields, ", ") + " FROM domains d JOIN hosting h ON h.dom_id = d.id" + join + " ORDER BY d.id", nil
 }
@@ -264,7 +266,11 @@ func pleskFromRows(run *vhostRun, rows, aliasRows [][]string) []VHost {
 
 	items := make([]VHost, 0, len(rows))
 	for _, row := range rows {
-		if len(row) != 10 || row[1] == "" {
+		// A root helper of the previous release returns 10 columns.
+		if len(row) == 10 {
+			row = append(row, "NULL")
+		}
+		if len(row) != 11 || row[1] == "" {
 			continue
 		}
 		id, name, owner, root, php, handler, ssl, certificate := row[0], strings.ToLower(row[1]), strings.ToLower(row[2]), row[3], row[4], row[5], row[6], row[7]
@@ -276,6 +282,7 @@ func pleskFromRows(run *vhostRun, rows, aliasRows [][]string) []VHost {
 			SSL:          ssl == "true",
 			DocumentRoot: optionalString(strings.TrimSuffix(root, "/")),
 			Owner:        optionalString(owner),
+			subdomain:    row[10] != "NULL" && row[10] != "" && row[10] != "0",
 		}
 		if item.SSL {
 			item.Ports = append(item.Ports, 443)

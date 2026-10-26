@@ -16,7 +16,7 @@
       }
     },
     "vhosts": {
-      "hash": "052ee1cb68884354740793b98e1cdf3b1ba3dd63cdc37af65ba7956b02fb2525",
+      "hash": "885ae951e0fe1154e67faf9e6c91fb6b858eaa68bc88801f1b27f462766b3362",
       "mode": "full",
       "payload": {
         "items": [
@@ -36,6 +36,9 @@
             },
             "config_file": "/etc/apache2/sites-enabled/shop.conf",
             "document_root": "/var/www/shop/public",
+            "http2": false,
+            "http3": false,
+            "https_redirect": true,
             "name": "shop.example.test",
             "owner": null,
             "php": {
@@ -46,6 +49,7 @@
               80,
               443
             ],
+            "redirect": null,
             "source": "apache",
             "ssl": true
           }

@@ -189,7 +189,9 @@ func collectApache(ctx context.Context, run *vhostRun) ([]VHost, error) {
 			Aliases:    append(slices.Clone(ref.aliases), block.aliases...),
 			Ports:      []int{ref.port},
 			SSL:        block.ssl || (!block.found && ref.port == 443),
+			HTTP2:      block.http2,
 			ConfigFile: optionalString(ref.file),
+			Redirect:   block.redirect,
 		}
 		if block.documentRoot != "" {
 			item.DocumentRoot = optionalString(block.documentRoot)
@@ -294,6 +296,17 @@ type apacheBlock struct {
 	// aliases come from ServerAlias: apachectl -S lists them only for
 	// addresses with several name-based vhosts.
 	aliases []string
+	// http2 is set by a Protocols directive that lists h2 or h2c.
+	http2 bool
+	// redirect is set when the block redirects every request.
+	redirect *VHostRedirect
+	// sections counts the open sections other than <IfModule> and its
+	// kin: a redirect inside <Location> or <Directory> covers part of the
+	// site only.
+	sections int
+	// restricted is set by a RewriteCond on anything but the scheme, host
+	// or port, until the RewriteRule it applies to.
+	restricted bool
 }
 
 type apacheParser struct {
@@ -370,6 +383,25 @@ func (parser *apacheParser) directives(content []string, block *apacheBlock, dep
 			if inBlock {
 				return
 			}
+		case strings.HasPrefix(directive, "</"):
+			if !apacheConditionalSection(directive[2:]) && block.sections > 0 {
+				block.sections--
+			}
+		case strings.HasPrefix(directive, "<"):
+			if !apacheConditionalSection(directive[1:]) {
+				block.sections++
+			}
+		case block.sections == 0 && block.redirect == nil && (directive == "redirect" || directive == "redirectpermanent" || directive == "redirecttemp" || directive == "redirectmatch"):
+			block.redirect = apacheRedirect(directive, fields[1:])
+		case directive == "rewritecond" && block.sections == 0:
+			if !slices.Contains(apacheRewriteConditions, strings.ToUpper(argument)) {
+				block.restricted = true
+			}
+		case directive == "rewriterule" && block.sections == 0:
+			if !block.restricted && block.redirect == nil {
+				block.redirect = apacheRewriteRedirect(fields[1:])
+			}
+			block.restricted = false
 		case directive == "documentroot" && block.documentRoot == "":
 			block.documentRoot = strings.TrimSuffix(argument, "/")
 			if block.documentRoot == "" {
@@ -379,6 +411,10 @@ func (parser *apacheParser) directives(content []string, block *apacheBlock, dep
 			for _, alias := range fields[1:] {
 				block.aliases = append(block.aliases, lowerHostname(alias))
 			}
+		case directive == "protocols":
+			block.http2 = slices.ContainsFunc(fields[1:], func(protocol string) bool {
+				return strings.EqualFold(protocol, "h2") || strings.EqualFold(protocol, "h2c")
+			})
 		case directive == "sslengine":
 			block.ssl = strings.EqualFold(argument, "on")
 		case directive == "sslcertificatefile" && block.certificate == "":
@@ -402,6 +438,79 @@ func (parser *apacheParser) directives(content []string, block *apacheBlock, dep
 			}
 		}
 	}
+}
+
+// apacheConditionalSection reports whether a section (lower case,
+// without its "<") applies to the whole virtual host when its condition
+// holds: <IfModule>, <IfDefine>, <IfVersion>, <IfFile>, <IfDirective>.
+func apacheConditionalSection(name string) bool {
+	return strings.HasPrefix(name, "if") && !strings.HasPrefix(strings.TrimSuffix(name, ">"), "if ") && strings.TrimSuffix(name, ">") != "if"
+}
+
+// apacheSameHost are the variables of a redirect target that keep the
+// requested host.
+var apacheSameHost = []string{"%{HTTP_HOST}", "%{SERVER_NAME}"}
+
+// apacheRewriteConditions are the RewriteCond test strings that only pick
+// the scheme, host or port, as in certbot's "RewriteCond %{SERVER_NAME}
+// =example.com": the rule after them still covers every path.
+var apacheRewriteConditions = []string{"%{HTTPS}", "%{HTTP_HOST}", "%{SERVER_NAME}", "%{SERVER_PORT}", "%{REQUEST_SCHEME}", "%{HTTP:X-FORWARDED-PROTO}"}
+
+// apacheRedirectStatuses maps mod_alias's status keywords.
+var apacheRedirectStatuses = map[string]int{"permanent": 301, "temp": 302, "seeother": 303}
+
+// apacheRedirect parses a Redirect, RedirectPermanent, RedirectTemp or
+// RedirectMatch of every path to an absolute URL.
+func apacheRedirect(directive string, arguments []string) *VHostRedirect {
+	status := 302
+	if directive == "redirectpermanent" {
+		status = 301
+	}
+	if (directive == "redirect" || directive == "redirectmatch") && len(arguments) == 3 {
+		if keyword, ok := apacheRedirectStatuses[strings.ToLower(arguments[0])]; ok {
+			status = keyword
+		} else if code, err := strconv.Atoi(arguments[0]); err == nil {
+			status = code
+		} else {
+			return nil
+		}
+		arguments = arguments[1:]
+	}
+	if len(arguments) != 2 {
+		return nil
+	}
+	if directive == "redirectmatch" {
+		if !slices.Contains(nginxCatchAll, arguments[0]) {
+			return nil
+		}
+	} else if arguments[0] != "/" {
+		return nil
+	}
+	return newRedirect(status, arguments[1], apacheSameHost...)
+}
+
+// apacheRewriteRedirect parses a RewriteRule of every path to an absolute
+// URL: "RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [END,NE,R=permanent]".
+// An absolute URL redirects with a 302 unless the R flag says otherwise.
+func apacheRewriteRedirect(arguments []string) *VHostRedirect {
+	if len(arguments) < 2 || !slices.Contains(nginxCatchAll, arguments[0]) {
+		return nil
+	}
+	status := 302
+	if len(arguments) > 2 {
+		for _, flag := range strings.Split(strings.Trim(arguments[2], "[]"), ",") {
+			name, value, _ := strings.Cut(strings.TrimSpace(flag), "=")
+			if !strings.EqualFold(name, "R") && !strings.EqualFold(name, "redirect") {
+				continue
+			}
+			if keyword, ok := apacheRedirectStatuses[strings.ToLower(value)]; ok {
+				status = keyword
+			} else if code, err := strconv.Atoi(value); err == nil {
+				status = code
+			}
+		}
+	}
+	return newRedirect(status, arguments[1], apacheSameHost...)
 }
 
 // apachePHPHint recognises how a directive runs PHP:

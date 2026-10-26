@@ -1,0 +1,6 @@
+server {
+    root /home/helpdesk/helpdesk.example.org/public;
+    server_name helpdesk.example.org;
+
+    include /etc/nginx/ssl/helpdesk.example.org;
+}

@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -126,6 +127,7 @@ func directAdminDomain(run *vhostRun, user, userDir, home, domain string, option
 			subdomain := item
 			subdomain.Name = label + "." + domain
 			subdomain.Aliases = nil
+			subdomain.subdomain = true
 			subdomainRoot := root + "/" + label
 			subdomain.DocumentRoot = &subdomainRoot
 			items = append(items, subdomain)
@@ -183,15 +185,35 @@ func directAdminPHP(config, options map[string]string) *VHostPHP {
 // passwdHomes maps user names to home directories from /etc/passwd.
 func passwdHomes(host *Host) map[string]string {
 	homes := map[string]string{}
+	for _, account := range passwdAccounts(host) {
+		homes[account.name] = account.home
+	}
+	return homes
+}
+
+// passwdAccount is a line of /etc/passwd with an absolute home directory.
+type passwdAccount struct {
+	name string
+	uid  int
+	home string
+}
+
+// passwdAccounts reads /etc/passwd; the uid is -1 when it is not a number.
+func passwdAccounts(host *Host) []passwdAccount {
 	data, err := host.readFile("/etc/passwd")
 	if err != nil {
-		return homes
+		return nil
 	}
+	var accounts []passwdAccount
 	for _, line := range lines(data) {
 		fields := strings.Split(line, ":")
 		if len(fields) >= 7 && fields[0] != "" && strings.HasPrefix(fields[5], "/") {
-			homes[fields[0]] = fields[5]
+			uid, err := strconv.Atoi(fields[2])
+			if err != nil {
+				uid = -1
+			}
+			accounts = append(accounts, passwdAccount{name: fields[0], uid: uid, home: fields[5]})
 		}
 	}
-	return homes
+	return accounts
 }

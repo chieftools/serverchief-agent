@@ -235,9 +235,9 @@ func TestVHostsApacheDebian(t *testing.T) {
 	info := collectVHosts(t, NewVHosts(host))
 
 	checkVHosts(t, info, map[string]string{
-		"apache/example.com":        `{"source":"apache","name":"example.com","aliases":["www.example.com"],"ports":[80,443],"ssl":true,"document_root":"/var/www/example.com/public","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"example.com","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["example.com","www.example.com"],"fingerprint":"` + pemFingerprint(t, exampleCert) + `"},"config_file":"/etc/apache2/sites-enabled/example.com.conf","owner":null}`,
-		"apache/shop.example.org":   `{"source":"apache","name":"shop.example.org","aliases":["*.shop.example.org"],"ports":[443],"ssl":true,"document_root":"/srv/shop/htdocs","php":{"version":"8.2","handler":"module"},"certificate":{"subject":"shop.example.org","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["*.shop.example.org","shop.example.org"],"fingerprint":"` + pemFingerprint(t, shopCert) + `"},"config_file":"/etc/apache2/sites-enabled/shop.example.org.conf","owner":null}`,
-		"apache/web-01.example.net": `{"source":"apache","name":"web-01.example.net","aliases":[],"ports":[80],"ssl":false,"document_root":"/var/www/html","php":{"version":"8.2","handler":"module"},"certificate":null,"config_file":"/etc/apache2/sites-enabled/000-default.conf","owner":null}`,
+		"apache/example.com":        `{"source":"apache","name":"example.com","aliases":["www.example.com"],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/var/www/example.com/public","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"example.com","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["example.com","www.example.com"],"fingerprint":"` + pemFingerprint(t, exampleCert) + `"},"config_file":"/etc/apache2/sites-enabled/example.com.conf","owner":null,"redirect":null,"https_redirect":true}`,
+		"apache/shop.example.org":   `{"source":"apache","name":"shop.example.org","aliases":["*.shop.example.org"],"ports":[443],"ssl":true,"http2":false,"http3":false,"document_root":"/srv/shop/htdocs","php":{"version":"8.2","handler":"module"},"certificate":{"subject":"shop.example.org","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["*.shop.example.org","shop.example.org"],"fingerprint":"` + pemFingerprint(t, shopCert) + `"},"config_file":"/etc/apache2/sites-enabled/shop.example.org.conf","owner":null,"redirect":null,"https_redirect":false}`,
+		"apache/web-01.example.net": `{"source":"apache","name":"web-01.example.net","aliases":[],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/var/www/html","php":{"version":"8.2","handler":"module"},"certificate":null,"config_file":"/etc/apache2/sites-enabled/000-default.conf","owner":null,"redirect":null,"https_redirect":false}`,
 	})
 	if !slices.Equal(ran, []string{"apache2ctl -S"}) {
 		t.Fatalf("ran %v", ran)
@@ -268,8 +268,8 @@ func TestVHostsApacheEL9(t *testing.T) {
 		t.Fatalf("ran %v", ran)
 	}
 	checkVHosts(t, info, map[string]string{
-		"apache/legacy.example.net": `{"source":"apache","name":"legacy.example.net","aliases":[],"ports":[80],"ssl":false,"document_root":"/srv/legacy/public","php":{"version":null,"handler":"fpm"},"certificate":null,"config_file":"/etc/httpd/conf.d/legacy.conf","owner":null}`,
-		"apache/www.example.net":    `{"source":"apache","name":"www.example.net","aliases":["example.net"],"ports":[80,443],"ssl":true,"document_root":"/var/www/example.net","php":{"version":"8.3","handler":"fpm"},"certificate":{"subject":"www.example.net","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["example.net","www.example.net"],"fingerprint":"` + pemFingerprint(t, localhostCert) + `"},"config_file":"/etc/httpd/conf.d/ssl.conf","owner":null}`,
+		"apache/legacy.example.net": `{"source":"apache","name":"legacy.example.net","aliases":[],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/srv/legacy/public","php":{"version":null,"handler":"fpm"},"certificate":null,"config_file":"/etc/httpd/conf.d/legacy.conf","owner":null,"redirect":null,"https_redirect":false}`,
+		"apache/example.net":        `{"source":"apache","name":"example.net","aliases":["www.example.net"],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":"/var/www/example.net","php":{"version":"8.3","handler":"fpm"},"certificate":{"subject":"www.example.net","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["example.net","www.example.net"],"fingerprint":"` + pemFingerprint(t, localhostCert) + `"},"config_file":"/etc/httpd/conf.d/ssl.conf","owner":null,"redirect":null,"https_redirect":false}`,
 	})
 }
 
@@ -299,9 +299,9 @@ func TestVHostsApacheDirectAdminLSAPI(t *testing.T) {
 	// the version from DirectAdmin's selection. An explicit FPM handler
 	// is kept as configured.
 	want := map[string]string{
-		"apache/www.alice.example":      `{"source":"apache","name":"www.alice.example","aliases":["alice.example"],"ports":[80],"ssl":false,"document_root":"/home/alice/domains/alice.example/public_html","php":{"version":"7.4","handler":"lsapi"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/alice/httpd.conf","owner":null}`,
-		"apache/www.blog.alice.example": `{"source":"apache","name":"www.blog.alice.example","aliases":["blog.alice.example"],"ports":[80],"ssl":false,"document_root":"/home/alice/domains/alice.example/public_html/blog","php":{"version":"7.4","handler":"lsapi"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/alice/httpd.conf","owner":null}`,
-		"apache/www.carol.example":      `{"source":"apache","name":"www.carol.example","aliases":["carol.example"],"ports":[80],"ssl":false,"document_root":"/home/carol/domains/carol.example/public_html","php":{"version":"8.2","handler":"fpm"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/carol/httpd.conf","owner":null}`,
+		"apache/alice.example":      `{"source":"apache","name":"alice.example","aliases":["www.alice.example"],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/home/alice/domains/alice.example/public_html","php":{"version":"7.4","handler":"lsapi"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/alice/httpd.conf","owner":null,"redirect":null,"https_redirect":false}`,
+		"apache/blog.alice.example": `{"source":"apache","name":"blog.alice.example","aliases":["www.blog.alice.example"],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/home/alice/domains/alice.example/public_html/blog","php":{"version":"7.4","handler":"lsapi"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/alice/httpd.conf","owner":null,"redirect":null,"https_redirect":false}`,
+		"apache/carol.example":      `{"source":"apache","name":"carol.example","aliases":["www.carol.example"],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/home/carol/domains/carol.example/public_html","php":{"version":"8.2","handler":"fpm"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/carol/httpd.conf","owner":null,"redirect":null,"https_redirect":false}`,
 	}
 	t.Run("server-wide lsapi handler", func(t *testing.T) {
 		parser := &apacheParser{host: newHost(t, true), serverRoot: "/etc/httpd", files: map[string][]string{}}
@@ -360,10 +360,10 @@ func TestVHostsNginx(t *testing.T) {
 	collector := NewVHosts(host)
 	info := collectVHosts(t, collector)
 	checkVHosts(t, info, map[string]string{
-		"nginx/api.example.org":    `{"source":"nginx","name":"api.example.org","aliases":["~^api-(?<region>[a-z]+)\\.example\\.org$"],"ports":[8080,8443],"ssl":true,"document_root":"/srv/api/public","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"api.example.org","issuer":"Test CA","not_after":"2026-12-01T00:00:00Z","names":["api.example.org"],"fingerprint":"` + pemFingerprint(t, apiCert) + `"},"config_file":"/etc/nginx/sites-enabled/api.example.org","owner":null}`,
-		"nginx/example.com":        `{"source":"nginx","name":"example.com","aliases":["*.cdn.example.com","www.example.com"],"ports":[80,443],"ssl":true,"document_root":"/var/www/example.com/public","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"example.com","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["*.cdn.example.com","example.com","www.example.com"],"fingerprint":"` + pemFingerprint(t, exampleCert) + `"},"config_file":"/etc/nginx/sites-enabled/example.com","owner":null}`,
-		"nginx/legacy.example.net": `{"source":"nginx","name":"legacy.example.net","aliases":[],"ports":[80],"ssl":false,"document_root":"/srv/legacy","php":{"version":null,"handler":"fpm"},"certificate":null,"config_file":"/etc/nginx/sites-enabled/legacy","owner":null}`,
-		"nginx/multi.example.org":  `{"source":"nginx","name":"multi.example.org","aliases":["alias-one.example.org","alias-two.example.org"],"ports":[80,8080],"ssl":false,"document_root":"/usr/share/nginx/html","php":{"version":"8.3","handler":"fpm"},"certificate":null,"config_file":"/etc/nginx/conf.d/multi.example.org.conf","owner":null}`,
+		"nginx/api.example.org":    `{"source":"nginx","name":"api.example.org","aliases":["~^api-(?<region>[a-z]+)\\.example\\.org$"],"ports":[8080,8443],"ssl":true,"http2":false,"http3":false,"document_root":"/srv/api/public","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"api.example.org","issuer":"Test CA","not_after":"2026-12-01T00:00:00Z","names":["api.example.org"],"fingerprint":"` + pemFingerprint(t, apiCert) + `"},"config_file":"/etc/nginx/sites-enabled/api.example.org","owner":null,"redirect":null,"https_redirect":false}`,
+		"nginx/example.com":        `{"source":"nginx","name":"example.com","aliases":["*.cdn.example.com","www.example.com"],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/var/www/example.com/public","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"example.com","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["*.cdn.example.com","example.com","www.example.com"],"fingerprint":"` + pemFingerprint(t, exampleCert) + `"},"config_file":"/etc/nginx/sites-enabled/example.com","owner":null,"redirect":null,"https_redirect":true}`,
+		"nginx/legacy.example.net": `{"source":"nginx","name":"legacy.example.net","aliases":[],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/srv/legacy","php":{"version":null,"handler":"fpm"},"certificate":null,"config_file":"/etc/nginx/sites-enabled/legacy","owner":null,"redirect":null,"https_redirect":false}`,
+		"nginx/multi.example.org":  `{"source":"nginx","name":"multi.example.org","aliases":["alias-one.example.org","alias-two.example.org"],"ports":[80,8080],"ssl":false,"http2":false,"http3":false,"document_root":"/usr/share/nginx/html","php":{"version":"8.3","handler":"fpm"},"certificate":null,"config_file":"/etc/nginx/conf.d/multi.example.org.conf","owner":null,"redirect":null,"https_redirect":false}`,
 	})
 	// nginx -V only prints build flags; nginx -t and -T test the
 	// configuration, which opens (and creates) every log file.
@@ -482,12 +482,12 @@ func TestVHostsPlesk(t *testing.T) {
 	}, &ran)
 	info := collectVHosts(t, NewVHosts(host))
 	checkVHosts(t, info, map[string]string{
-		"plesk/customer.test":         `{"source":"plesk","name":"customer.test","aliases":["customer-alias.test","www.customer.test"],"ports":[80],"ssl":false,"document_root":"/var/www/vhosts/customer.test/httpdocs","php":null,"certificate":null,"config_file":null,"owner":"customer.test"}`,
-		"plesk/example.com":           `{"source":"plesk","name":"example.com","aliases":["example.net","www.example.com","www.example.net"],"ports":[80,443],"ssl":true,"document_root":"/var/www/vhosts/example.com/httpdocs","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"example.com","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["example.com","example.net","www.example.com"],"fingerprint":"` + pemFingerprint(t, certificate) + `"},"config_file":"/var/www/vhosts/system/example.com/conf/httpd.conf","owner":"example.com"}`,
-		"plesk/shop.example.com":      `{"source":"plesk","name":"shop.example.com","aliases":["www.shop.example.com"],"ports":[80],"ssl":false,"document_root":"/var/www/vhosts/example.com/shop.example.com","php":{"version":"7.4","handler":"fastcgi"},"certificate":null,"config_file":null,"owner":"example.com"}`,
-		"plesk/static.customer.test":  `{"source":"plesk","name":"static.customer.test","aliases":["www.static.customer.test"],"ports":[80,443],"ssl":true,"document_root":"/var/www/vhosts/customer.test/static","php":{"version":null,"handler":"fpm"},"certificate":null,"config_file":null,"owner":"customer.test"}`,
-		"plesk/www.legacy.example":    `{"source":"plesk","name":"www.legacy.example","aliases":[],"ports":[80],"ssl":false,"document_root":"/var/www/vhosts/www.legacy.example/httpdocs","php":null,"certificate":null,"config_file":null,"owner":"www.legacy.example"}`,
-		"plesk/xn--bcher-kva.example": `{"source":"plesk","name":"xn--bcher-kva.example","aliases":["www.xn--bcher-kva.example"],"ports":[80],"ssl":false,"document_root":"/var/www/vhosts/xn--bcher-kva.example/httpdocs","php":{"version":"8.1","handler":"cgi"},"certificate":null,"config_file":null,"owner":"xn--bcher-kva.example"}`,
+		"plesk/customer.test":         `{"source":"plesk","name":"customer.test","aliases":["customer-alias.test","www.customer.test"],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/var/www/vhosts/customer.test/httpdocs","php":null,"certificate":null,"config_file":null,"owner":"customer.test","redirect":null,"https_redirect":false}`,
+		"plesk/example.com":           `{"source":"plesk","name":"example.com","aliases":["example.net","www.example.com","www.example.net"],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":"/var/www/vhosts/example.com/httpdocs","php":{"version":"8.2","handler":"fpm"},"certificate":{"subject":"example.com","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["example.com","example.net","www.example.com"],"fingerprint":"` + pemFingerprint(t, certificate) + `"},"config_file":"/var/www/vhosts/system/example.com/conf/httpd.conf","owner":"example.com","redirect":null,"https_redirect":false}`,
+		"plesk/shop.example.com":      `{"source":"plesk","name":"shop.example.com","aliases":[],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/var/www/vhosts/example.com/shop.example.com","php":{"version":"7.4","handler":"fastcgi"},"certificate":null,"config_file":null,"owner":"example.com","redirect":null,"https_redirect":false}`,
+		"plesk/static.customer.test":  `{"source":"plesk","name":"static.customer.test","aliases":[],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":"/var/www/vhosts/customer.test/static","php":{"version":null,"handler":"fpm"},"certificate":null,"config_file":null,"owner":"customer.test","redirect":null,"https_redirect":false}`,
+		"plesk/www.legacy.example":    `{"source":"plesk","name":"www.legacy.example","aliases":[],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/var/www/vhosts/www.legacy.example/httpdocs","php":null,"certificate":null,"config_file":null,"owner":"www.legacy.example","redirect":null,"https_redirect":false}`,
+		"plesk/xn--bcher-kva.example": `{"source":"plesk","name":"xn--bcher-kva.example","aliases":["www.xn--bcher-kva.example"],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/var/www/vhosts/xn--bcher-kva.example/httpdocs","php":{"version":"8.1","handler":"cgi"},"certificate":null,"config_file":null,"owner":"xn--bcher-kva.example","redirect":null,"https_redirect":false}`,
 	})
 	if len(ran) != 3 {
 		t.Fatalf("ran %v", ran)
@@ -547,7 +547,7 @@ func TestPleskQueryWithoutOptionalColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "SELECT d.id, d.name, d.name, h.www_root, NULL, NULL, NULL, NULL, NULL, NULL FROM domains d JOIN hosting h ON h.dom_id = d.id ORDER BY d.id"
+	want := "SELECT d.id, d.name, d.name, h.www_root, NULL, NULL, NULL, NULL, NULL, NULL, NULL FROM domains d JOIN hosting h ON h.dom_id = d.id ORDER BY d.id"
 	if query != want {
 		t.Fatalf("query\n got %s\nwant %s", query, want)
 	}
@@ -586,11 +586,11 @@ func TestVHostsDirectAdmin(t *testing.T) {
 	aliceCert := `{"subject":"alice.example","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":["alice.example","blog.alice.example","www.alice.example"],"fingerprint":"` + pemFingerprint(t, certificate) + `"}`
 	aliceConf := `"/usr/local/directadmin/data/users/alice/domains/alice.example.conf"`
 	checkVHosts(t, info, map[string]string{
-		"directadmin/alice.example":         `{"source":"directadmin","name":"alice.example","aliases":["alice.example.net","www.alice.example"],"ports":[80,443],"ssl":true,"document_root":"/home/alice/domains/alice.example/public_html","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice"}`,
-		"directadmin/blog.alice.example":    `{"source":"directadmin","name":"blog.alice.example","aliases":["www.blog.alice.example"],"ports":[80,443],"ssl":true,"document_root":"/home/alice/domains/alice.example/public_html/blog","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice"}`,
-		"directadmin/staging.alice.example": `{"source":"directadmin","name":"staging.alice.example","aliases":["www.staging.alice.example"],"ports":[80,443],"ssl":true,"document_root":"/home/alice/domains/alice.example/public_html/staging","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice"}`,
-		"directadmin/shop.alice.example":    `{"source":"directadmin","name":"shop.alice.example","aliases":["www.shop.alice.example"],"ports":[80],"ssl":false,"document_root":"/home/alice/domains/shop.alice.example/public_html","php":null,"certificate":null,"config_file":"/usr/local/directadmin/data/users/alice/domains/shop.alice.example.conf","owner":"alice"}`,
-		"directadmin/bob.example":           `{"source":"directadmin","name":"bob.example","aliases":["www.bob.example"],"ports":[80],"ssl":false,"document_root":"/srv/home/bob/domains/bob.example/public_html","php":{"version":"8.2","handler":"fpm"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/bob/domains/bob.example.conf","owner":"bob"}`,
+		"directadmin/alice.example":         `{"source":"directadmin","name":"alice.example","aliases":["alice.example.net","www.alice.example"],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":"/home/alice/domains/alice.example/public_html","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice","redirect":null,"https_redirect":false}`,
+		"directadmin/blog.alice.example":    `{"source":"directadmin","name":"blog.alice.example","aliases":[],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":"/home/alice/domains/alice.example/public_html/blog","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice","redirect":null,"https_redirect":false}`,
+		"directadmin/staging.alice.example": `{"source":"directadmin","name":"staging.alice.example","aliases":[],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":"/home/alice/domains/alice.example/public_html/staging","php":{"version":"7.4","handler":"lsapi"},"certificate":` + aliceCert + `,"config_file":` + aliceConf + `,"owner":"alice","redirect":null,"https_redirect":false}`,
+		"directadmin/shop.alice.example":    `{"source":"directadmin","name":"shop.alice.example","aliases":["www.shop.alice.example"],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/home/alice/domains/shop.alice.example/public_html","php":null,"certificate":null,"config_file":"/usr/local/directadmin/data/users/alice/domains/shop.alice.example.conf","owner":"alice","redirect":null,"https_redirect":false}`,
+		"directadmin/bob.example":           `{"source":"directadmin","name":"bob.example","aliases":["www.bob.example"],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":"/srv/home/bob/domains/bob.example/public_html","php":{"version":"8.2","handler":"fpm"},"certificate":null,"config_file":"/usr/local/directadmin/data/users/bob/domains/bob.example.conf","owner":"bob","redirect":null,"https_redirect":false}`,
 	})
 	for _, opened := range recorder.opened {
 		if strings.HasSuffix(opened, ".key") || strings.HasSuffix(opened, ".combined") {
@@ -870,5 +870,178 @@ func TestVHostsApacheThroughTheRootHelperWhenTheDaemonCannotReadTheConfig(t *tes
 	_, err = host.apacheVHosts(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "httpd -S exited with status 1") || !strings.Contains(err.Error(), "through the helper: httpd -S exited") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+// TestVHostsNginxFoldsPanelRedirects mirrors Forge and Ploi servers, whose
+// sites come with an HTTPS redirect for ".<name>" and a www redirect, and
+// certbot's nginx installer: the redirects fold into their sites.
+func TestVHostsNginxFoldsPanelRedirects(t *testing.T) {
+	afspraakCert, _ := testCertificate(t, "afspraak.mkin.nl", []string{"afspraak.mkin.nl", "www.afspraak.mkin.nl"}, certificateExpiry)
+	adminCert, _ := testCertificate(t, "admin.zdcheck.mkin.nl", []string{"admin.zdcheck.mkin.nl"}, certificateExpiry)
+	zdcheckCert, _ := testCertificate(t, "zdcheck.mkin.nl", []string{"zdcheck.mkin.nl"}, certificateExpiry)
+	backupCert, _ := testCertificate(t, "backup.chief.app", []string{"backup.chief.app", "www.backup.chief.app"}, certificateExpiry)
+	certbotCert, _ := testCertificate(t, "certbot.example.org", []string{"certbot.example.org"}, certificateExpiry)
+	var ran []string
+	host := &Host{
+		FS: vhostFixture(t, "forge", map[string][]byte{
+			"usr/sbin/nginx": nil,
+			"etc/nginx/ssl/domains/1937544/3714827/server.crt":       afspraakCert,
+			"etc/nginx/ssl/domains/1037424/2979372/server.crt":       adminCert,
+			"etc/nginx/ssl/domains/1037519/2979440/server.crt":       zdcheckCert,
+			"etc/letsencrypt/live/backup.chief.app/fullchain.pem":    backupCert,
+			"etc/letsencrypt/live/certbot.example.org/fullchain.pem": certbotCert,
+		}),
+		Command: vhostCommands(t, "forge", []vhostCommand{{prefix: "nginx -V", file: "nginx-V.txt"}}, &ran),
+	}
+	info := collectVHosts(t, NewVHosts(host))
+	certificate := func(data []byte, subject string, names string) string {
+		return `{"subject":"` + subject + `","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":` + names + `,"fingerprint":"` + pemFingerprint(t, data) + `"}`
+	}
+	checkVHosts(t, info, map[string]string{
+		"nginx/admin.zdcheck.mkin.nl": `{"source":"nginx","name":"admin.zdcheck.mkin.nl","aliases":[],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/mkin/admin.zdcheck.mkin.nl/current/public","php":{"version":"8.3","handler":"fpm"},"certificate":` + certificate(adminCert, "admin.zdcheck.mkin.nl", `["admin.zdcheck.mkin.nl"]`) + `,"config_file":"/etc/nginx/sites-enabled/admin.zdcheck.mkin.nl","owner":"mkin","redirect":null,"https_redirect":true}`,
+		"nginx/afspraak.mkin.nl":      `{"source":"nginx","name":"afspraak.mkin.nl","aliases":["www.afspraak.mkin.nl"],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/mkin/afspraak.mkin.nl/current/public","php":{"version":"8.3","handler":"fpm"},"certificate":` + certificate(afspraakCert, "afspraak.mkin.nl", `["afspraak.mkin.nl","www.afspraak.mkin.nl"]`) + `,"config_file":"/etc/nginx/sites-enabled/afspraak.mkin.nl","owner":"mkin","redirect":null,"https_redirect":true}`,
+		"nginx/zdcheck.mkin.nl":       `{"source":"nginx","name":"zdcheck.mkin.nl","aliases":[],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/afspraak/zdcheck.mkin.nl/current/public","php":{"version":"8.3","handler":"fpm"},"certificate":` + certificate(zdcheckCert, "zdcheck.mkin.nl", `["zdcheck.mkin.nl"]`) + `,"config_file":"/etc/nginx/sites-enabled/zdcheck.mkin.nl","owner":"afspraak","redirect":null,"https_redirect":true}`,
+		"nginx/backup.chief.app":      `{"source":"nginx","name":"backup.chief.app","aliases":["www.backup.chief.app"],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/backupchief/backup.chief.app/production/current/public","php":{"version":"8.5","handler":"fpm"},"certificate":` + certificate(backupCert, "backup.chief.app", `["backup.chief.app","www.backup.chief.app"]`) + `,"config_file":"/etc/nginx/sites-enabled/backup.chief.app","owner":"backupchief","redirect":null,"https_redirect":true}`,
+		"nginx/certbot.example.org":   `{"source":"nginx","name":"certbot.example.org","aliases":[],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":"/var/www/certbot","php":null,"certificate":` + certificate(certbotCert, "certbot.example.org", `["certbot.example.org"]`) + `,"config_file":"/etc/nginx/conf.d/certbot.example.org.conf","owner":null,"redirect":null,"https_redirect":true}`,
+		"nginx/plesk.example":         `{"source":"nginx","name":"plesk.example","aliases":["ipv4.plesk.example","www.plesk.example"],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/plesk.example.conf","owner":null,"redirect":null,"https_redirect":true}`,
+		"nginx/preferred.example":     `{"source":"nginx","name":"preferred.example","aliases":["alias.example","ipv4.preferred.example","www.preferred.example"],"ports":[443],"ssl":true,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/plesk.example.conf","owner":null,"redirect":null,"https_redirect":false}`,
+		"nginx/helpdesk.example.org":  `{"source":"nginx","name":"helpdesk.example.org","aliases":[],"ports":[443],"ssl":true,"http2":true,"http3":true,"document_root":"/home/helpdesk/helpdesk.example.org/public","php":null,"certificate":null,"config_file":"/etc/nginx/sites-enabled/helpdesk.example.org","owner":null,"redirect":null,"https_redirect":false}`,
+		"nginx/noh3.example.org":      `{"source":"nginx","name":"noh3.example.org","aliases":[],"ports":[443],"ssl":true,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/noh3.example.org.conf","owner":null,"redirect":null,"https_redirect":false}`,
+		"nginx/old.example.org":       `{"source":"nginx","name":"old.example.org","aliases":["www.old.example.org"],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/old.example.org.conf","owner":null,"redirect":{"status":308,"target":"https://new.example.net$request_uri","host":"new.example.net"},"https_redirect":false}`,
+	})
+}
+
+func TestFoldRedirects(t *testing.T) {
+	siteCert := &VHostCertificate{Subject: "example.com", Names: []string{"example.com", "www.example.com"}, Fingerprint: "site"}
+	site := func() VHost {
+		return VHost{Name: "example.com", Ports: []int{443}, SSL: true, Certificate: siteCert}
+	}
+	redirect := func(item VHost, target string) VHost {
+		item.Redirect = newRedirect(301, target, nginxSameHost...)
+		return item
+	}
+	cases := []struct {
+		name  string
+		items []VHost
+		want  []VHost
+	}{
+		{
+			name:  "a plain www redirect the certificate covers becomes an alias",
+			items: []VHost{site(), redirect(VHost{Name: "www.example.com", Ports: []int{80}}, "https://example.com$request_uri")},
+			want:  []VHost{{Name: "example.com", Aliases: []string{"www.example.com"}, Ports: []int{80, 443}, SSL: true, Certificate: siteCert}},
+		},
+		{
+			name:  "a plain redirect of a name the certificate does not cover only adds its port",
+			items: []VHost{site(), redirect(VHost{Name: "example.net", Ports: []int{80}}, "https://example.com$request_uri")},
+			want:  []VHost{{Name: "example.com", Aliases: []string{}, Ports: []int{80, 443}, SSL: true, Certificate: siteCert}},
+		},
+		{
+			name:  "a TLS redirect with a certificate of its own stays an item",
+			items: []VHost{site(), redirect(VHost{Name: "www.example.com", Ports: []int{443}, SSL: true, Certificate: &VHostCertificate{Fingerprint: "other"}}, "https://example.com$request_uri")},
+			want: []VHost{
+				{Name: "example.com", Aliases: []string{}, Ports: []int{443}, SSL: true, Certificate: siteCert},
+				{Name: "www.example.com", Aliases: []string{}, Ports: []int{443}, SSL: true, Certificate: &VHostCertificate{Fingerprint: "other"}, Redirect: newRedirect(301, "https://example.com$request_uri")},
+			},
+		},
+		{
+			name:  "an HTTPS redirect keeps the names no site serves",
+			items: []VHost{site(), redirect(VHost{Name: "example.com", Aliases: []string{"*.example.com", "example.org"}, Ports: []int{80}}, "https://$host$request_uri")},
+			want: []VHost{
+				{Name: "example.com", Aliases: []string{}, Ports: []int{80, 443}, SSL: true, Certificate: siteCert, HTTPSRedirect: true},
+				{Name: "example.org", Aliases: []string{}, Ports: []int{80}, Redirect: newRedirect(301, "https://$host$request_uri", nginxSameHost...)},
+			},
+		},
+		{
+			name:  "a site that lists www first is named by its apex",
+			items: []VHost{{Name: "www.example.com", Aliases: []string{"example.com"}, Ports: []int{443}, SSL: true, Certificate: siteCert}, {Name: "www.example.com", Ports: []int{8443}}, redirect(VHost{Name: "example.com", Aliases: []string{"www.example.com"}, Ports: []int{80}}, "https://$host$request_uri")},
+			want:  []VHost{{Name: "example.com", Aliases: []string{"www.example.com"}, Ports: []int{80, 443, 8443}, SSL: true, Certificate: siteCert, HTTPSRedirect: true}},
+		},
+		{
+			name:  "a redirect to the preferred www name names the site by its apex",
+			items: []VHost{{Name: "www.example.com", Ports: []int{443}, SSL: true, Certificate: siteCert}, redirect(VHost{Name: "example.com", Ports: []int{443}, SSL: true, Certificate: siteCert}, "https://www.example.com$request_uri")},
+			want:  []VHost{{Name: "example.com", Aliases: []string{"www.example.com"}, Ports: []int{443}, SSL: true, Certificate: siteCert}},
+		},
+		{
+			name:  "a redirect of a site's own name to elsewhere folds its port in",
+			items: []VHost{site(), redirect(VHost{Name: "example.com", Ports: []int{80}}, "https://example.net$request_uri")},
+			want:  []VHost{{Name: "example.com", Aliases: []string{}, Ports: []int{80, 443}, SSL: true, Certificate: siteCert}},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			got := mergeVHosts(VHostSourceNginx, test.items)
+			if again := mergeVHosts(VHostSourceNginx, got); !reflect.DeepEqual(again, got) {
+				t.Errorf("merging again changed\n%+v\nto\n%+v", got, again)
+			}
+			for index := range test.want {
+				test.want[index].Source = VHostSourceNginx
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Errorf("got\n%+v\nwant\n%+v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestNewRedirect(t *testing.T) {
+	cases := []struct {
+		status int
+		target string
+		want   *VHostRedirect
+	}{
+		{301, "https://$host$request_uri", &VHostRedirect{Status: 301, Target: "https://$host$request_uri", https: true}},
+		{301, "$scheme://Example.COM.$request_uri", &VHostRedirect{Status: 301, Target: "$scheme://Example.COM.$request_uri", Host: optionalString("example.com")}},
+		{302, "https://example.com:8443/path", &VHostRedirect{Status: 302, Target: "https://example.com:8443/path", Host: optionalString("example.com"), https: true}},
+		{308, "https://%{SERVER_NAME}%{REQUEST_URI}", &VHostRedirect{Status: 308, Target: "https://%{SERVER_NAME}%{REQUEST_URI}", https: true}},
+		{301, "https://[2001:db8::1]/", &VHostRedirect{Status: 301, Target: "https://[2001:db8::1]/", Host: optionalString("[2001:db8::1]"), https: true}},
+		{200, "https://example.com", nil},
+		{301, "/elsewhere", nil},
+	}
+	for _, test := range cases {
+		if got := newRedirect(test.status, test.target, append(nginxSameHost, apacheSameHost...)...); !reflect.DeepEqual(got, test.want) {
+			t.Errorf("newRedirect(%d, %q) = %+v, want %+v", test.status, test.target, got, test.want)
+		}
+	}
+}
+
+// TestVHostsPanelImplicitAliases drops the names Plesk and DirectAdmin add
+// to every site from all sources, unless the certificate covers them.
+func TestVHostsPanelImplicitAliases(t *testing.T) {
+	covering := &VHostCertificate{Subject: "covered.example", Names: []string{"covered.example", "www.covered.example", "www.shop.covered.example"}}
+	items := []VHost{
+		{Source: VHostSourceNginx, Name: "example.com", Aliases: []string{"example.com.192-0-2-1.plesk.page", "ipv4.example.com", "ipv6.example.com", "www.example.com"}, DocumentRoot: optionalString("/var/www/vhosts/example.com/httpdocs")},
+		{Source: VHostSourcePlesk, Name: "example.com", Aliases: []string{"www.example.com"}},
+		{Source: VHostSourceNginx, Name: "shop.example.com", Aliases: []string{"ipv4.shop.example.com", "shop.example.com.2001-db8--1.plesk.page", "www.shop.example.com"}},
+		{Source: VHostSourcePlesk, Name: "shop.example.com", Aliases: []string{"www.shop.example.com"}, subdomain: true},
+		{Source: VHostSourceApache, Name: "shop.covered.example", Aliases: []string{"www.shop.covered.example"}, Certificate: covering},
+		{Source: VHostSourceDirectAdmin, Name: "shop.covered.example", Aliases: []string{"www.shop.covered.example"}, subdomain: true, Certificate: covering},
+		{Source: VHostSourceNginx, Name: "ipv4.chief.tools", Aliases: []string{"ipv4.ipv4.chief.tools", "www.ipv4.chief.tools"}},
+		// Without a Plesk item, the generated configuration tells.
+		{Source: VHostSourceApache, Name: "example.org", Aliases: []string{"ipv6.example.org", "www.example.org"}, ConfigFile: optionalString("/var/www/vhosts/system/example.org/conf/httpd.conf")},
+		{Source: VHostSourceNginx, Name: "example.org", Aliases: []string{"example.org.192-0-2-1.plesk.page", "www.example.org"}, ConfigFile: optionalString("/etc/nginx/plesk.conf.d/vhosts/example.org.conf")},
+		// A domain alias gets the names too.
+		{Source: VHostSourceNginx, Name: "example.net", Aliases: []string{"example.net.example", "ipv4.example.net.example", "ipv4.example.net"}, ConfigFile: optionalString("/etc/nginx/plesk.conf.d/forwarding/example.net_nginx.conf")},
+	}
+	refineVHosts(&Host{FS: fstest.MapFS{}}, items)
+	want := [][]string{
+		{"www.example.com"},
+		{"www.example.com"},
+		{},
+		{},
+		{"www.shop.covered.example"},
+		{"www.shop.covered.example"},
+		{"ipv4.ipv4.chief.tools", "www.ipv4.chief.tools"},
+		{"www.example.org"},
+		{"www.example.org"},
+		{"example.net.example"},
+	}
+	for index, item := range items {
+		if !slices.Equal(item.Aliases, want[index]) {
+			t.Errorf("%s/%s: aliases %v, want %v", item.Source, item.Name, item.Aliases, want[index])
+		}
+	}
+	if items[0].Owner != nil {
+		t.Errorf("a panel site got owner %q", *items[0].Owner)
 	}
 }

@@ -1,6 +1,6 @@
-1	example.com	example.com	/var/www/vhosts/example.com/httpdocs	true	plesk-php82-fpm	true	@CERT_HEX@	Lets Encrypt example.com	NULL
-2	shop.example.com	example.com	/var/www/vhosts/example.com/shop.example.com	true	plesk-php74-fastcgi	false	NULL	NULL	NULL
-3	Customer.TEST	customer.test	/var/www/vhosts/customer.test/httpdocs/	false	plesk-php83-fpm	false	NULL	NULL	NULL
-4	static.customer.test	customer.test	/var/www/vhosts/customer.test/static	true	fpm	true	NULL	NULL	NULL
-7	xn--bcher-kva.example	xn--bcher-kva.example	/var/www/vhosts/xn--bcher-kva.example/httpdocs	true	plesk-php81-cgi	false	NULL	NULL	NULL
-8	www.legacy.example	www.legacy.example	/var/www/vhosts/www.legacy.example/httpdocs	false	NULL	false	NULL	NULL	NULL
+1	example.com	example.com	/var/www/vhosts/example.com/httpdocs	true	plesk-php82-fpm	true	@CERT_HEX@	Lets Encrypt example.com	NULL	0
+2	shop.example.com	example.com	/var/www/vhosts/example.com/shop.example.com	true	plesk-php74-fastcgi	false	NULL	NULL	NULL	1
+3	Customer.TEST	customer.test	/var/www/vhosts/customer.test/httpdocs/	false	plesk-php83-fpm	false	NULL	NULL	NULL	0
+4	static.customer.test	customer.test	/var/www/vhosts/customer.test/static	true	fpm	true	NULL	NULL	NULL	3
+7	xn--bcher-kva.example	xn--bcher-kva.example	/var/www/vhosts/xn--bcher-kva.example/httpdocs	true	plesk-php81-cgi	false	NULL	NULL	NULL	0
+8	www.legacy.example	www.legacy.example	/var/www/vhosts/www.legacy.example/httpdocs	false	NULL	false	NULL	NULL	NULL	0

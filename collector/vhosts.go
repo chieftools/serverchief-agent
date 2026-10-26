@@ -51,16 +51,46 @@ type VHost struct {
 	Aliases []string `json:"aliases"`
 	Ports   []int    `json:"ports"`
 	// SSL is true when any of the ports serves TLS.
-	SSL          bool              `json:"ssl"`
+	SSL bool `json:"ssl"`
+	// HTTP2 is true when a block of the site offers HTTP/2, HTTP3 when
+	// one listens for QUIC and offers HTTP/3.
+	HTTP2        bool              `json:"http2"`
+	HTTP3        bool              `json:"http3"`
 	DocumentRoot *string           `json:"document_root"`
 	PHP          *VHostPHP         `json:"php"`
 	Certificate  *VHostCertificate `json:"certificate"`
 	// ConfigFile is the file that defines the site (without a line number,
 	// so editing other sites in the same file does not change the item).
 	ConfigFile *string `json:"config_file"`
-	// Owner is the Plesk subscription or DirectAdmin user; null for plain
-	// web servers.
+	// Owner is the Plesk subscription or DirectAdmin user, or on a plain
+	// web server the user whose home directory holds the document root;
+	// null otherwise.
 	Owner *string `json:"owner"`
+	// Redirect is set when the site only redirects elsewhere: a redirect
+	// to a site of the same source is folded into that site instead.
+	Redirect *VHostRedirect `json:"redirect"`
+	// HTTPSRedirect is true when plain HTTP requests for the site are
+	// redirected to HTTPS on the same name.
+	HTTPSRedirect bool `json:"https_redirect"`
+
+	// subdomain marks a panel subdomain, whose www alias the panel adds
+	// on its own; it is not sent.
+	subdomain bool
+}
+
+// VHostRedirect is where a site that only redirects sends its requests.
+type VHostRedirect struct {
+	// Status is the HTTP status: 301, 302, 303, 307 or 308.
+	Status int `json:"status"`
+	// Target is the URL as configured, variables included
+	// (https://$host$request_uri, https://%{SERVER_NAME}%{REQUEST_URI}).
+	Target string `json:"target"`
+	// Host is the target's host name in lower case, or null when the
+	// target keeps the requested host.
+	Host *string `json:"host"`
+
+	// https is true when the target's scheme is https; it is not sent.
+	https bool
 }
 
 // VHostPHP describes how a site runs PHP.
@@ -314,9 +344,109 @@ func (collector *VHosts) Collect(ctx context.Context) (any, error) {
 	if present > 0 && len(failures) == present {
 		return nil, errors.New(strings.Join(failures, "; "))
 	}
+	refineVHosts(collector.host, info.Items)
 	info.Normalize()
 	collector.snapshot = &vhostSnapshot{token: token, at: collector.host.now(), items: slices.Clone(info.Items)}
 	return info, nil
+}
+
+// refineVHosts applies what one source knows to the items of every
+// source: the aliases Plesk and DirectAdmin add to their sites on their own
+// are dropped (see implicitAlias) unless the item's certificate covers
+// them, and a site no panel manages gets the user whose home directory
+// holds its document root as its owner. A site whose configuration Plesk
+// generated counts as a Plesk site without the Plesk source.
+func refineVHosts(host *Host, items []VHost) {
+	panels := map[string]VHost{}
+	for _, item := range items {
+		if item.Source == VHostSourcePlesk || item.Source == VHostSourceDirectAdmin {
+			panels[item.Name] = item
+		}
+	}
+	var accounts []passwdAccount
+	accountsRead := false
+	for index := range items {
+		item := &items[index]
+		panel, ok := panels[item.Name]
+		// Plesk generates the web server configuration of its sites, so
+		// they are known even when the Plesk source fails.
+		if !ok && item.ConfigFile != nil && pleskGenerated(*item.ConfigFile) {
+			panel, ok = VHost{Source: VHostSourcePlesk, Name: item.Name}, true
+		}
+		if ok {
+			names := append([]string{item.Name, panel.Name}, item.Aliases...)
+			item.Aliases = slices.DeleteFunc(slices.Clone(item.Aliases), func(alias string) bool {
+				return implicitAlias(panel, names, alias) && (item.Certificate == nil || !item.Certificate.covers(alias))
+			})
+			continue
+		}
+		if item.Owner != nil || item.DocumentRoot == nil {
+			continue
+		}
+		if !accountsRead {
+			accounts, accountsRead = passwdAccounts(host), true
+		}
+		item.Owner = homeOwner(accounts, *item.DocumentRoot)
+	}
+}
+
+// pleskGenerated reports whether Plesk wrote a web server configuration
+// file: /var/www/vhosts/system/<domain>/conf/*, which the web servers
+// include through plesk.conf.d/vhosts/<domain>.conf links, and the
+// plesk.conf.d/forwarding, wildcards and ip_default files.
+func pleskGenerated(name string) bool {
+	return strings.HasPrefix(name, pleskVhostsSystem+"/") || strings.Contains(name, "/plesk.conf.d/")
+}
+
+// pleskPreviewLabel is the address label of a Plesk preview name,
+// example.com.192-0-2-1.plesk.page, for IPv4 and IPv6 addresses.
+var pleskPreviewLabel = regexp.MustCompile(`^([0-9]{1,3}(-[0-9]{1,3}){3}|[0-9a-f]{0,4}(-[0-9a-f]{0,4}){2,7})\.`)
+
+// implicitAlias reports whether a panel adds alias to the site on its own:
+// Plesk's ipv4.<name> and ipv6.<name> names and its preview name
+// <name>.<address>.<preview zone>, for the site's names and its domain
+// aliases, and the www.<name> of a subdomain, which Plesk and DirectAdmin
+// serve but rarely has DNS or a certificate.
+func implicitAlias(panel VHost, names []string, alias string) bool {
+	if panel.subdomain && alias == "www."+panel.Name {
+		return true
+	}
+	if panel.Source != VHostSourcePlesk {
+		return false
+	}
+	for _, name := range names {
+		if alias == "ipv4."+name || alias == "ipv6."+name {
+			return true
+		}
+		if rest, ok := strings.CutPrefix(alias, name+"."); ok && pleskPreviewLabel.MatchString(rest) {
+			return true
+		}
+	}
+	return false
+}
+
+// minimumUserUID is the first uid of regular users on Debian and EL.
+const minimumUserUID = 1000
+
+// homeOwner returns the regular user whose home directory holds root, the
+// deepest when homes nest, or nil. Forge, Ploi and similar tools run each
+// site as its own user from /home/<user>/<site>.
+func homeOwner(accounts []passwdAccount, root string) *string {
+	var owner *passwdAccount
+	for index := range accounts {
+		account := &accounts[index]
+		home := strings.TrimSuffix(account.home, "/")
+		if account.uid < minimumUserUID || account.uid == 65534 || home == "" || !strings.HasPrefix(root, home+"/") {
+			continue
+		}
+		if owner == nil || len(home) > len(strings.TrimSuffix(owner.home, "/")) {
+			owner = account
+		}
+	}
+	if owner == nil {
+		return nil
+	}
+	return &owner.name
 }
 
 // vhostRun holds per-collection caches shared by the sources.
@@ -345,12 +475,42 @@ func addWWWAliases(items []VHost) []VHost {
 	return items
 }
 
-// mergeVHosts sets source on every item and folds items with the same name
-// into one: ports and aliases are joined, ssl is true when any block serves
-// TLS, and single-valued fields come from the first TLS block that has
-// them, then from the first plain block (a port 80 block is often only a
-// redirect to https).
+// mergeVHosts sets source on every item, names a site that serves both
+// www.<name> and <name> by the latter, folds redirects into the sites they
+// point to (see foldRedirects) and folds items with the same name
+// into one: ports and aliases are joined, ssl is true when any block
+// serves TLS, and single-valued fields come from the first TLS block that
+// has them, then from the first plain block. Running it again on its
+// result changes nothing.
 func mergeVHosts(source string, items []VHost) []VHost {
+	var sites, redirects []VHost
+	for _, item := range items {
+		item.Source = source
+		item.Name = strings.TrimSuffix(item.Name, ".")
+		if item.Name == "" {
+			continue
+		}
+		if item.Redirect != nil {
+			redirects = append(redirects, item)
+		} else {
+			sites = append(sites, item)
+		}
+	}
+	result := mergeByName(preferApex(mergeByName(sites)))
+	rest := mergeByName(foldRedirects(result, redirects))
+	// Folding can add the apex of a www site, as Plesk's redirect to the
+	// preferred www name does.
+	result = append(mergeByName(preferApex(result)), rest...)
+	for position := range result {
+		item := &result[position]
+		item.Aliases = slices.DeleteFunc(sortedUnique(item.Aliases), func(alias string) bool { return alias == item.Name || alias == "" })
+		item.Ports = sortedUnique(item.Ports)
+	}
+	return result
+}
+
+// mergeByName folds items with the same name into one, TLS blocks first.
+func mergeByName(items []VHost) []VHost {
 	ordered := slices.Clone(items)
 	slices.SortStableFunc(ordered, func(a, b VHost) int {
 		switch {
@@ -365,11 +525,6 @@ func mergeVHosts(source string, items []VHost) []VHost {
 	index := make(map[string]int)
 	var result []VHost
 	for _, item := range ordered {
-		item.Source = source
-		item.Name = strings.TrimSuffix(item.Name, ".")
-		if item.Name == "" {
-			continue
-		}
 		position, seen := index[item.Name]
 		if !seen {
 			index[item.Name] = len(result)
@@ -382,6 +537,9 @@ func mergeVHosts(source string, items []VHost) []VHost {
 		merged.Aliases = append(merged.Aliases, item.Aliases...)
 		merged.Ports = append(merged.Ports, item.Ports...)
 		merged.SSL = merged.SSL || item.SSL
+		merged.HTTP2 = merged.HTTP2 || item.HTTP2
+		merged.HTTP3 = merged.HTTP3 || item.HTTP3
+		merged.HTTPSRedirect = merged.HTTPSRedirect || item.HTTPSRedirect
 		if merged.DocumentRoot == nil {
 			merged.DocumentRoot = item.DocumentRoot
 		}
@@ -397,13 +555,198 @@ func mergeVHosts(source string, items []VHost) []VHost {
 		if merged.Owner == nil {
 			merged.Owner = item.Owner
 		}
-	}
-	for position := range result {
-		item := &result[position]
-		item.Aliases = slices.DeleteFunc(sortedUnique(item.Aliases), func(alias string) bool { return alias == item.Name || alias == "" })
-		item.Ports = sortedUnique(item.Ports)
+		if merged.Redirect == nil {
+			merged.Redirect = item.Redirect
+		}
 	}
 	return result
+}
+
+// preferApex names a site that serves both www.<name> and <name> by the
+// latter, as its panel and other sources name it, whichever its web server
+// configuration lists first.
+func preferApex(items []VHost) []VHost {
+	for index := range items {
+		item := &items[index]
+		apex, ok := strings.CutPrefix(item.Name, "www.")
+		if !ok {
+			continue
+		}
+		if position := slices.Index(item.Aliases, apex); position >= 0 {
+			item.Aliases[position] = item.Name
+			item.Name = apex
+		}
+	}
+	return items
+}
+
+// foldRedirects folds the blocks that only redirect into the sites they
+// redirect to, and returns the rest. Hosting panels and ACME clients add
+// such blocks to every site (Forge, Ploi, certbot, Plesk):
+//
+//   - A redirect to https on the requested host (server_name .example.com;
+//     return 301 https://$host$request_uri) adds its ports to the sites of
+//     its names and sets their https_redirect. Wildcard names are dropped
+//     once one of its names is a site: they only answer plain HTTP.
+//   - A redirect to another host (www.example.com to example.com) adds its
+//     names to the target site as aliases, with its ports, when it serves
+//     the target's certificate or none. A plain HTTP block's names the
+//     target's certificate does not cover are dropped: they never reach
+//     TLS, so they are not the certificate's concern.
+//
+// A redirect to a host the source does not serve, or with a certificate of
+// its own, stays an item of its own with redirect set.
+func foldRedirects(sites, redirects []VHost) []VHost {
+	index := make(map[string]int)
+	for position, site := range sites {
+		index[site.Name] = position
+	}
+	for position, site := range sites {
+		for _, alias := range site.Aliases {
+			if _, taken := index[alias]; !taken {
+				index[alias] = position
+			}
+		}
+	}
+	var rest []VHost
+	for _, redirect := range redirects {
+		upgrade := redirect.Redirect.Host == nil && redirect.Redirect.https && redirect.Certificate == nil
+		// A name a site serves folds into it whatever the redirect does,
+		// so every name stays one item.
+		var unmatched []string
+		matched := false
+		for _, name := range append([]string{redirect.Name}, redirect.Aliases...) {
+			position, ok := index[name]
+			if !ok {
+				unmatched = append(unmatched, name)
+				continue
+			}
+			site := &sites[position]
+			site.Ports = append(site.Ports, redirect.Ports...)
+			site.HTTPSRedirect = site.HTTPSRedirect || upgrade
+			matched = true
+		}
+		if matched && upgrade {
+			unmatched = slices.DeleteFunc(unmatched, isHostnamePattern)
+		}
+		if len(unmatched) == 0 {
+			continue
+		}
+		if redirect.Redirect.Host == nil {
+			rest = append(rest, withNames(redirect, unmatched))
+			continue
+		}
+		position, ok := index[*redirect.Redirect.Host]
+		if !ok || (redirect.Certificate != nil && (sites[position].Certificate == nil || sites[position].Certificate.Fingerprint != redirect.Certificate.Fingerprint)) {
+			rest = append(rest, withNames(redirect, unmatched))
+			continue
+		}
+		site := &sites[position]
+		site.Ports = append(site.Ports, redirect.Ports...)
+		for _, name := range unmatched {
+			if redirect.Certificate != nil || site.Certificate == nil || site.Certificate.covers(name) {
+				site.Aliases = append(site.Aliases, name)
+			}
+		}
+	}
+	return rest
+}
+
+// withNames returns a copy of item with the first plain name as its name
+// and the others as aliases.
+func withNames(item VHost, names []string) VHost {
+	primary := slices.IndexFunc(names, func(name string) bool { return !isHostnamePattern(name) })
+	if primary < 0 {
+		primary = 0
+	}
+	item.Name = names[primary]
+	item.Aliases = slices.Delete(slices.Clone(names), primary, primary+1)
+	return item
+}
+
+// isHostnamePattern reports whether a server name is a wildcard
+// (*.example.com, www.example.*) or a regular expression (~^…).
+func isHostnamePattern(name string) bool {
+	return strings.HasPrefix(name, "~") || strings.Contains(name, "*")
+}
+
+// covers reports whether the certificate is valid for a host name: one of
+// its names or its subject is the name, or a wildcard matching exactly one
+// label of it.
+func (certificate *VHostCertificate) covers(host string) bool {
+	host = strings.ToLower(host)
+	for _, name := range append(slices.Clone(certificate.Names), strings.ToLower(certificate.Subject)) {
+		if name == host {
+			return true
+		}
+		suffix, wildcard := strings.CutPrefix(name, "*")
+		if !wildcard || !strings.HasPrefix(suffix, ".") || strings.HasPrefix(host, "*") {
+			continue
+		}
+		if label, ok := strings.CutSuffix(host, suffix); ok && label != "" && !strings.Contains(label, ".") {
+			return true
+		}
+	}
+	return false
+}
+
+// redirectHost returns the host of a URL after its scheme: a variable
+// ($host, %{HTTP_HOST}) as written, or a literal host without its port.
+func redirectHost(rest string) string {
+	switch {
+	case strings.HasPrefix(rest, "%{"):
+		if end := strings.IndexByte(rest, '}'); end >= 0 {
+			return rest[:end+1]
+		}
+		return ""
+	case strings.HasPrefix(rest, "$"):
+		end := 1
+		for end < len(rest) && (rest[end] == '_' || rest[end] >= 'a' && rest[end] <= 'z' || rest[end] >= 'A' && rest[end] <= 'Z' || rest[end] >= '0' && rest[end] <= '9') {
+			end++
+		}
+		return rest[:end]
+	}
+	authority := rest
+	if end := strings.IndexAny(rest, "/?#$%"); end >= 0 {
+		authority = rest[:end]
+	}
+	if _, after, found := strings.Cut(authority, "@"); found {
+		authority = after
+	}
+	if strings.HasPrefix(authority, "[") {
+		if end := strings.IndexByte(authority, ']'); end >= 0 {
+			return authority[:end+1]
+		}
+		return ""
+	}
+	if colon := strings.LastIndexByte(authority, ':'); colon >= 0 {
+		return authority[:colon]
+	}
+	return authority
+}
+
+// newRedirect describes a redirect to target, or returns nil when status
+// is not a redirect or target is not an absolute URL. sameHost are the
+// variables that stand for the requested host ($host, %{HTTP_HOST}).
+func newRedirect(status int, target string, sameHost ...string) *VHostRedirect {
+	switch status {
+	case 301, 302, 303, 307, 308:
+	default:
+		return nil
+	}
+	scheme, rest, ok := strings.Cut(target, "://")
+	if !ok || scheme == "" {
+		return nil
+	}
+	hostname := redirectHost(rest)
+	if hostname == "" {
+		return nil
+	}
+	redirect := &VHostRedirect{Status: status, Target: target, https: strings.EqualFold(scheme, "https")}
+	if !slices.ContainsFunc(sameHost, func(variable string) bool { return strings.EqualFold(variable, hostname) }) {
+		redirect.Host = optionalString(strings.TrimSuffix(strings.ToLower(hostname), "."))
+	}
+	return redirect
 }
 
 // certificate returns the public facts of the first certificate in a PEM

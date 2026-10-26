@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io/fs"
@@ -396,6 +397,8 @@ func nginxVHosts(config nginxConfig, run *vhostRun) []VHost {
 		inherited := nginxServerDefaults{
 			root:        nginxValue(http.Block, "root"),
 			certificate: nginxValue(http.Block, "ssl_certificate"),
+			http2:       nginxValue(http.Block, "http2"),
+			http3:       nginxValue(http.Block, "http3"),
 			upstreams:   make(map[string]string),
 		}
 		for _, directive := range http.Block {
@@ -420,7 +423,11 @@ func nginxVHosts(config nginxConfig, run *vhostRun) []VHost {
 type nginxServerDefaults struct {
 	root        string
 	certificate string
-	upstreams   map[string]string
+	// http2 and http3 are the http-level "http2 on|off" and "http3
+	// on|off", which server blocks inherit.
+	http2     string
+	http3     string
+	upstreams map[string]string
 }
 
 func nginxServer(server nginxDirective, defaults nginxServerDefaults, config nginxConfig, run *vhostRun) (VHost, bool) {
@@ -428,9 +435,15 @@ func nginxServer(server nginxDirective, defaults nginxServerDefaults, config ngi
 	for _, directive := range server.Block {
 		if directive.Name == "server_name" {
 			for _, name := range directive.Args {
-				if name != "_" && name != "" {
-					names = append(names, lowerHostname(name))
+				if name == "_" || name == "" {
+					continue
 				}
+				// ".example.com" is example.com and *.example.com.
+				if domain, ok := strings.CutPrefix(name, "."); ok && domain != "" {
+					names = append(names, lowerHostname(domain), lowerHostname("*."+domain))
+					continue
+				}
+				names = append(names, lowerHostname(name))
 			}
 		}
 	}
@@ -446,9 +459,10 @@ func nginxServer(server nginxDirective, defaults nginxServerDefaults, config ngi
 		Name:       names[primary],
 		Aliases:    slices.Delete(slices.Clone(names), primary, primary+1),
 		ConfigFile: optionalString(server.File),
+		Redirect:   nginxRedirect(server.Block),
 	}
 
-	listens := false
+	listens, quic, http2 := false, false, false
 	for _, directive := range server.Block {
 		switch directive.Name {
 		case "listen":
@@ -464,6 +478,9 @@ func nginxServer(server nginxDirective, defaults nginxServerDefaults, config ngi
 			if slices.Contains(directive.Args[1:], "ssl") || slices.Contains(directive.Args[1:], "quic") {
 				item.SSL = true
 			}
+			quic = quic || slices.Contains(directive.Args[1:], "quic")
+			// The listen parameter predates "http2 on" (nginx 1.25.1).
+			http2 = http2 || slices.Contains(directive.Args[1:], "http2")
 		case "ssl":
 			if len(directive.Args) == 1 && directive.Args[0] == "on" {
 				item.SSL = true
@@ -473,6 +490,9 @@ func nginxServer(server nginxDirective, defaults nginxServerDefaults, config ngi
 	if !listens {
 		item.Ports = []int{80}
 	}
+	// HTTP/3 takes a QUIC listener and is on unless "http3 off".
+	item.HTTP2 = http2 || cmp.Or(nginxValue(server.Block, "http2"), defaults.http2) == "on"
+	item.HTTP3 = quic && cmp.Or(nginxValue(server.Block, "http3"), defaults.http3) != "off"
 
 	root := nginxValue(server.Block, "root")
 	if root == "" {
@@ -514,6 +534,122 @@ func nginxServer(server nginxDirective, defaults nginxServerDefaults, config ngi
 		item.PHP = newPHP(phpVersionFrom(pass), handler)
 	}
 	return item, true
+}
+
+// nginxSameHost are the variables of a redirect target that keep the
+// requested host.
+var nginxSameHost = []string{"$host", "$http_host", "$server_name"}
+
+// nginxCatchAll are rewrite patterns that match every request.
+var nginxCatchAll = []string{"^", "^.*$", ".*", "(.*)", "^(.*)", "^(.*)$", "^/(.*)", "^/(.*)$", "^/?(.*)$", "^/?(.*)"}
+
+// nginxRedirect returns where a server block redirects every request, or
+// nil when it serves any itself. That is a server-level return or
+// rewrite, which runs before locations are matched; certbot's
+// "if ($host = example.com) { return 301 https://$host$request_uri; }"
+// blocks before a final "return 404"; or a "location /" that redirects
+// beside nothing but auxiliary locations (nginxAuxiliaryLocation), like
+// Plesk's port 80 blocks and redirects to the preferred domain.
+func nginxRedirect(block []nginxDirective) *VHostRedirect {
+	var conditional *VHostRedirect
+	for _, directive := range block {
+		switch directive.Name {
+		case "return":
+			if redirect := nginxReturn(directive.Args); redirect != nil {
+				return redirect
+			}
+			return conditional
+		case "rewrite":
+			if redirect := nginxRewrite(directive.Args); redirect != nil {
+				return redirect
+			}
+		case "if":
+			if conditional == nil && len(directive.Args) > 0 && strings.HasPrefix(directive.Args[0], "($host") && len(directive.Block) == 1 && directive.Block[0].Name == "return" {
+				conditional = nginxReturn(directive.Block[0].Args)
+			}
+		}
+	}
+	var redirect *VHostRedirect
+	for _, directive := range block {
+		if directive.Name != "location" || directive.Block == nil {
+			continue
+		}
+		if slices.Equal(directive.Args, []string{"/"}) {
+			redirect = nginxLocationRedirect(directive.Block)
+			continue
+		}
+		if !nginxAuxiliaryLocation(directive.Args) {
+			return nil
+		}
+	}
+	return redirect
+}
+
+// nginxAuxiliaryLocations are path parts of the locations panels add next
+// to a redirect: ACME challenges and Plesk's mail client autoconfiguration.
+var nginxAuxiliaryLocations = []string{"/.well-known/", "autodiscover", "autoconfig", "mobileconfig"}
+
+// nginxAuxiliaryLocation reports whether a location serves a panel's
+// side requests rather than the site: one of nginxAuxiliaryLocations, or
+// a named location (@mad), which only internal redirects reach.
+func nginxAuxiliaryLocation(arguments []string) bool {
+	if len(arguments) > 0 && strings.HasPrefix(arguments[0], "@") {
+		return true
+	}
+	return slices.ContainsFunc(arguments, func(argument string) bool {
+		return slices.ContainsFunc(nginxAuxiliaryLocations, func(part string) bool { return strings.Contains(argument, part) })
+	})
+}
+
+// nginxLocationRedirect returns the redirect of the first return or
+// rewrite of a location, or nil.
+func nginxLocationRedirect(block []nginxDirective) *VHostRedirect {
+	for _, directive := range block {
+		switch directive.Name {
+		case "return":
+			return nginxReturn(directive.Args)
+		case "rewrite":
+			if redirect := nginxRewrite(directive.Args); redirect != nil {
+				return redirect
+			}
+		}
+	}
+	return nil
+}
+
+// nginxReturn parses "return 301 URL" and "return URL" (a 302).
+func nginxReturn(arguments []string) *VHostRedirect {
+	switch len(arguments) {
+	case 1:
+		return newRedirect(302, arguments[0], nginxSameHost...)
+	case 2:
+		status, err := strconv.Atoi(arguments[0])
+		if err != nil {
+			return nil
+		}
+		return newRedirect(status, arguments[1], nginxSameHost...)
+	}
+	return nil
+}
+
+// nginxRewrite parses a rewrite of every request to an absolute URL:
+// "rewrite ^ https://example.com$request_uri permanent" (a 301; redirect
+// or no flag is a 302).
+func nginxRewrite(arguments []string) *VHostRedirect {
+	if len(arguments) < 2 || !slices.Contains(nginxCatchAll, arguments[0]) {
+		return nil
+	}
+	status := 302
+	if len(arguments) > 2 {
+		switch arguments[2] {
+		case "permanent":
+			status = 301
+		case "redirect":
+		default:
+			return nil
+		}
+	}
+	return newRedirect(status, arguments[1], nginxSameHost...)
 }
 
 // nginxListenPort returns the port of a listen address: "80", "[::]:443",

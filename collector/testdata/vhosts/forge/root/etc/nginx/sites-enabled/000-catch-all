@@ -1,0 +1,15 @@
+server {
+    http2 on;
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+
+    ssl_certificate /etc/nginx/ssl/catch-all.invalid.crt;
+    ssl_certificate_key /etc/nginx/ssl/catch-all.invalid.key;
+    ssl_reject_handshake on;
+
+    return 444;
+}
