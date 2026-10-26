@@ -2,6 +2,7 @@ package collector
 
 import (
 	"encoding/base64"
+	"fmt"
 	"io/fs"
 	"path"
 	"regexp"
@@ -33,9 +34,21 @@ var systemdUnitDirectories = []string{"/etc/systemd/system", "/lib/systemd/syste
 var rootCrontabs = []string{"/var/spool/cron/crontabs/root", "/var/spool/cron/root"}
 
 var (
-	certbotRenewCron = regexp.MustCompile(`(^|[\s/;&|'"])certbot(\s.*)?\srenew(\s|$)`)
+	// certbotRenewCron matches "certbot renew", the certbot-auto and
+	// letsencrypt-auto wrappers, and a scheduled "certonly", which renews
+	// a lineage when it is due (or always, with --renew-by-default).
+	certbotRenewCron = regexp.MustCompile(`(^|[\s/;&|'"])(certbot|letsencrypt)(-auto)?(\s.*)?\s(renew|certonly)(\s|$)`)
 	acmeShCron       = regexp.MustCompile(`acme\.sh(\s.*)?\s--cron(\s|$)`)
+	// forgeRenewCron matches the job Laravel Forge installs for each Let's
+	// Encrypt certificate in /etc/cron.d/letsencrypt-renew-domain-<id>:
+	// "43 7 * * 2 root /bin/bash /root/.letsencrypt-renew/2979372".
+	forgeRenewCron = regexp.MustCompile(`(/\S*/\.letsencrypt-renew/([0-9]+))(\s|$)`)
 )
+
+// forgeCertificateGlobs are where Forge keeps the certificate of an ID:
+// ssl/domains/<domain>/<id>/server.crt, and ssl/<site>/<id>/server.crt
+// before it grouped them by domain.
+var forgeCertificateGlobs = []string{"/etc/nginx/ssl/domains/*/%s/server.crt", "/etc/nginx/ssl/*/%s/server.crt"}
 
 // managers returns the certbot and acme.sh managers by the fingerprint of
 // the certificate they renew.
@@ -58,6 +71,9 @@ func (run *certificateRun) managers() map[string][]*CertificateManager {
 	}
 	for _, domain := range run.acmeShDomains() {
 		add(domain.certificates, domain.manager)
+	}
+	for _, certificate := range run.forgeCertificates() {
+		add(certificate.certificates, certificate.manager)
 	}
 	return managers
 }
@@ -183,8 +199,13 @@ func (run *certificateRun) timerEnabled(units ...string) bool {
 	return false
 }
 
-// crontabLines returns the active lines of root's crontabs, /etc/crontab
-// and /etc/cron.d/*, read once per collection.
+// cronPeriodicDirectories hold the scripts run-parts (or anacron) runs
+// from /etc/crontab: a monthly "certbot-auto renew" script is renewal too.
+var cronPeriodicDirectories = []string{"/etc/cron.hourly", "/etc/cron.daily", "/etc/cron.weekly", "/etc/cron.monthly"}
+
+// crontabLines returns the active lines of root's crontabs, /etc/crontab,
+// /etc/cron.d/* and the executable scripts of cronPeriodicDirectories,
+// read once per collection.
 func (run *certificateRun) crontabLines() []string {
 	if run.crontabsRead {
 		return run.crontabs
@@ -192,16 +213,30 @@ func (run *certificateRun) crontabLines() []string {
 	run.crontabsRead = true
 	host := run.host
 	files := append([]string{"/etc/crontab"}, rootCrontabs...)
-	if entries, err := host.readDir("/etc/cron.d"); err == nil {
+	// cron and run-parts skip names with dots and editor backups, and
+	// run-parts files that are not executable.
+	add := func(directory string, executable bool) {
+		entries, err := host.readDir(directory)
+		if err != nil {
+			return
+		}
 		for index, entry := range entries {
 			if index >= maxCronFiles {
 				break
 			}
-			// cron skips names with dots and editor backups.
-			if name := entry.Name(); !entry.IsDir() && !strings.ContainsAny(name, ".~") {
-				files = append(files, "/etc/cron.d/"+name)
+			name := entry.Name()
+			if entry.IsDir() || strings.ContainsAny(name, ".~") {
+				continue
 			}
+			if info, err := entry.Info(); executable && (err != nil || info.Mode()&0o111 == 0) {
+				continue
+			}
+			files = append(files, directory+"/"+name)
 		}
+	}
+	add("/etc/cron.d", false)
+	for _, directory := range cronPeriodicDirectories {
+		add(directory, true)
 	}
 	// Debian's /etc/cron.d/certbot only runs without systemd; on systemd
 	// hosts the timer does the work.
@@ -363,4 +398,41 @@ func (run *certificateRun) acmeShRenewalMode() string {
 		run.acmeShRenewal = &mode
 	}
 	return *run.acmeShRenewal
+}
+
+// forgeCertificates returns the certificates Laravel Forge renews, one per
+// renewal job in the crontabs. The job's script under /root is not read:
+// its certificate ID names the certificate's directory.
+func (run *certificateRun) forgeCertificates() []renewalConfig {
+	seen := map[string]bool{}
+	var result []renewalConfig
+	for _, line := range run.crontabLines() {
+		match := forgeRenewCron.FindStringSubmatch(line)
+		if match == nil || seen[match[2]] {
+			continue
+		}
+		if len(result) >= maxRenewalConfigs {
+			run.warn("forge: more than " + strconv.Itoa(maxRenewalConfigs) + " renewal jobs, the rest skipped")
+			break
+		}
+		script, id := match[1], match[2]
+		seen[id] = true
+		var certificates []string
+		for _, pattern := range forgeCertificateGlobs {
+			matches, _ := fs.Glob(run.host.FS, relative(fmt.Sprintf(pattern, id)))
+			for _, name := range matches {
+				certificates = append(certificates, "/"+name)
+			}
+		}
+		result = append(result, renewalConfig{
+			manager: &CertificateManager{
+				Tool:    optionalString(CertificateToolForge),
+				Name:    optionalString(id),
+				Renewal: optionalString(CertificateRenewalCron),
+				Config:  optionalString(script),
+			},
+			certificates: certificates,
+		})
+	}
+	return result
 }

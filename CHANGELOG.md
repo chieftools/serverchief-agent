@@ -13,12 +13,14 @@ release.
 
 - Sites report whether plain HTTP redirects to HTTPS (`https_redirect`), and a site that only redirects elsewhere reports where to (`redirect`: status, target and host).
 - Sites report whether they offer HTTP/2 (`http2`) and HTTP/3 over a QUIC listener (`http3`), from nginx's `http2`, `http3` and `listen … quic` and Apache's `Protocols`.
+- Certificates Laravel Forge renews are reported as managed by `forge`, from the renewal jobs Forge adds to `/etc/cron.d`.
 - Sites on servers without a hosting panel report the user whose home directory holds the document root as their owner, such as the site user of Forge and Ploi.
 
 ### Changed
 
 - Server blocks and virtual hosts that only redirect are folded into the site they point to instead of being listed as sites of their own. Forge, Ploi, certbot and Plesk add an HTTPS redirect and often a `www.` redirect to every site; these now add a port or an alias to that site. nginx's `.example.com` names are reported as `example.com` and `*.example.com`.
 - A site that serves both `www.<name>` and `<name>` is reported as `<name>`, whichever its web server configuration lists first, so it matches its panel's entry. Plesk's redirect to a preferred `www.` domain folds into that site too.
+- certbot renewal is also found in the scripts `run-parts` runs from `/etc/cron.hourly`, `daily`, `weekly` and `monthly`, and in jobs that run the `certbot-auto` or `letsencrypt-auto` wrappers or a scheduled `certonly`. Such certificates were reported without renewal automation.
 - Plesk's `ipv4.`, `ipv6.` and preview names, and the `www.` name Plesk and DirectAdmin add to subdomains, are no longer reported as aliases unless the site's certificate covers them, so they no longer count as names the certificate misses.
 
 ## [0.2.1]

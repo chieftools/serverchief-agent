@@ -744,6 +744,16 @@ func TestCertbotRenewalDetection(t *testing.T) {
 			change: fstest.MapFS{"var/spool/cron/crontabs/root": mapFile([]byte("# m h dom mon dow command\n17 3 * * * /usr/bin/certbot renew --quiet --post-hook 'systemctl reload nginx'\n"))},
 			want:   CertificateRenewalCron,
 		},
+		"certbot-auto script run monthly by run-parts": {
+			remove: []string{"etc/systemd/system/timers.target.wants/certbot.timer", "etc/cron.d/certbot"},
+			change: fstest.MapFS{"etc/cron.monthly/renew-ssl-certificates": &fstest.MapFile{Mode: 0o755, Data: []byte("#!/bin/bash\n\n/opt/certbot/letsencrypt-auto certonly -c /etc/certbot/shop.example.test.conf --renew-by-default\n\nservice nginx reload\n")}},
+			want:   CertificateRenewalCron,
+		},
+		"script run-parts skips as not executable": {
+			remove: []string{"etc/systemd/system/timers.target.wants/certbot.timer", "etc/cron.d/certbot"},
+			change: fstest.MapFS{"etc/cron.daily/certbot": &fstest.MapFile{Mode: 0o644, Data: []byte("#!/bin/sh\ncertbot renew\n")}},
+			want:   CertificateRenewalNone,
+		},
 		"commented cron line": {
 			remove: []string{"etc/systemd/system/timers.target.wants/certbot.timer", "etc/cron.d/certbot"},
 			change: fstest.MapFS{"etc/crontab": mapFile([]byte("# 17 3 * * * root certbot renew\n"))},
@@ -1078,3 +1088,42 @@ func TestCertificatesChangeToken(t *testing.T) {
 }
 
 var _ io.Reader = (*trackedFile)(nil)
+
+// TestCertificatesForge recognises the certificates Laravel Forge renews by
+// the per-certificate jobs in /etc/cron.d, without reading the job scripts
+// under /root.
+func TestCertificatesForge(t *testing.T) {
+	pki := newTestPKI(t)
+	afspraak, _ := pki.leaf(t, leafOptions{commonName: "afspraak.mkin.nl", names: []string{"afspraak.mkin.nl", "www.afspraak.mkin.nl"}})
+	admin, _ := pki.leaf(t, leafOptions{commonName: "admin.zdcheck.mkin.nl", names: []string{"admin.zdcheck.mkin.nl"}})
+	zdcheck, _ := pki.leaf(t, leafOptions{commonName: "zdcheck.mkin.nl", names: []string{"zdcheck.mkin.nl"}})
+	tracker := &readTracker{MapFS: vhostFixture(t, "forge", map[string][]byte{
+		"usr/sbin/nginx": nil,
+		"etc/nginx/ssl/domains/1937544/3714827/server.crt": afspraak,
+		"etc/nginx/ssl/domains/1037424/2979372/server.crt": admin,
+		// A certificate Forge installed but does not renew.
+		"etc/nginx/ssl/domains/1037519/2979440/server.crt":     zdcheck,
+		"etc/cron.d/letsencrypt-renew-domain-1937544":          []byte("SHELL=/bin/sh\nPATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n\n44 19 * * 0 root /bin/bash /root/.letsencrypt-renew/3714827\n"),
+		"etc/cron.d/letsencrypt-renew-domain-1037424":          []byte("43 7 * * 2 root /bin/bash /root/.letsencrypt-renew/2979372\n"),
+		"root/.letsencrypt-renew/3714827":                      []byte("never read"),
+		"etc/cron.d/letsencrypt-renew-domain-1037519.dpkg-old": []byte("13 9 * * 1 root /bin/bash /root/.letsencrypt-renew/2979440\n"),
+	})}
+	var ran []string
+	host := &Host{FS: tracker, Roots: pki.roots(), Command: vhostCommands(t, "forge", []vhostCommand{{prefix: "nginx -V", file: "nginx-V.txt"}}, &ran)}
+	vhosts := NewVHosts(host)
+	items := certificatesByFingerprint(t, collectCertificates(t, NewCertificates(host, vhosts)))
+	if got, want := managerString(items[pemFingerprint(t, afspraak)].ManagedBy), "forge|3714827|<nil>|<nil>|<nil>|<nil>|<nil>|cron|/root/.letsencrypt-renew/3714827"; got != want {
+		t.Errorf("afspraak managed_by\n got %s\nwant %s", got, want)
+	}
+	if got, want := managerString(items[pemFingerprint(t, admin)].ManagedBy), "forge|2979372|<nil>|<nil>|<nil>|<nil>|<nil>|cron|/root/.letsencrypt-renew/2979372"; got != want {
+		t.Errorf("admin managed_by\n got %s\nwant %s", got, want)
+	}
+	if manager := items[pemFingerprint(t, zdcheck)].ManagedBy; manager != nil {
+		t.Errorf("zdcheck managed_by = %s", managerString(manager))
+	}
+	for name := range tracker.opens {
+		if strings.HasPrefix(name, "root/") {
+			t.Errorf("opened %s", name)
+		}
+	}
+}
