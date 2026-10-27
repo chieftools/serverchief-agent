@@ -240,7 +240,12 @@ func publicAddress(value string, ipv4 bool) *string {
 const transIPSeedHost = "pxe.frontend.transip.nl"
 
 // transIPResolvers are the resolvers TransIP configures on its VPSs.
-var transIPResolvers = map[string]bool{"195.8.195.8": true, "195.135.195.135": true}
+var transIPResolvers = map[netip.Addr]bool{
+	netip.MustParseAddr("195.8.195.8"):                    true,
+	netip.MustParseAddr("195.135.195.135"):                true,
+	netip.MustParseAddr("2a01:7c8:7000:195::8:195:8"):     true,
+	netip.MustParseAddr("2a01:7c8:7000:195::135:195:135"): true,
+}
 
 // Azure publishes this asset tag on every VM; Hyper-V elsewhere has the
 // same vendor and product names.
@@ -308,7 +313,7 @@ func (host *Host) transIPHinted() bool {
 	for _, file := range []string{"/etc/resolv.conf", "/run/systemd/resolve/resolv.conf"} {
 		if data, err := host.readFile(file); err == nil {
 			for _, nameserver := range parseResolvConf(data).nameservers {
-				if transIPResolvers[nameserver] {
+				if address, err := netip.ParseAddr(nameserver); err == nil && transIPResolvers[address.Unmap()] {
 					return true
 				}
 			}

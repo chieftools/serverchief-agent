@@ -358,6 +358,7 @@ func TestCloudTransIPFromHints(t *testing.T) {
 	}{
 		{"apt mirror", "QEMU", map[string]string{"etc/apt/sources.list": "deb http://mirror.transip.net/ubuntu/ubuntu xenial main restricted\n"}, "transip", "transip", true},
 		{"resolvers", "QEMU", map[string]string{"etc/resolv.conf": "nameserver 195.8.195.8\nnameserver 195.135.195.135\n"}, "transip", "transip", true},
+		{"ipv6 resolvers", "QEMU", map[string]string{"etc/resolv.conf": "nameserver 2a01:7c8:7000:195:0:8:195:8\n"}, "transip", "transip", true},
 		{"mirror elsewhere", "QEMU", map[string]string{"etc/apt/sources.list": "deb http://mirror.transip.net/ubuntu/ubuntu xenial main\n"}, "transip-other", "", true},
 		{"not qemu", "VMware, Inc.", map[string]string{"etc/apt/sources.list": "deb http://mirror.transip.net/ubuntu/ubuntu xenial main\n"}, "transip", "", false},
 		{"no hints", "QEMU", map[string]string{"etc/apt/sources.list": "deb http://archive.ubuntu.com/ubuntu jammy main\n"}, "transip", "", false},

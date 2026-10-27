@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Fixed
+
+- TransIP VPSs that use TransIP's IPv6 resolvers, such as older CentOS 7 images without TransIP's package mirror, are recognised as TransIP. Only the IPv4 resolvers counted as a TransIP hint, so these reported no cloud provider.
+
 ## [0.2.6]
 
 ### Added
