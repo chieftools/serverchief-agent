@@ -595,7 +595,9 @@ func preferApex(items []VHost) []VHost {
 //     TLS, so they are not the certificate's concern.
 //
 // A redirect to a host the source does not serve, or with a certificate of
-// its own, stays an item of its own with redirect set.
+// its own, stays an item of its own with redirect set. Redirects to another
+// host fold first, so the names they add are a site's when an HTTPS
+// redirect for them folds, whatever order the configuration lists them in.
 func foldRedirects(sites, redirects []VHost) []VHost {
 	index := make(map[string]int)
 	for position, site := range sites {
@@ -608,8 +610,19 @@ func foldRedirects(sites, redirects []VHost) []VHost {
 			}
 		}
 	}
+	ordered := slices.Clone(redirects)
+	slices.SortStableFunc(ordered, func(a, b VHost) int {
+		switch {
+		case (a.Redirect.Host == nil) == (b.Redirect.Host == nil):
+			return 0
+		case a.Redirect.Host != nil:
+			return -1
+		default:
+			return 1
+		}
+	})
 	var rest []VHost
-	for _, redirect := range redirects {
+	for _, redirect := range ordered {
 		upgrade := redirect.Redirect.Host == nil && redirect.Redirect.https && redirect.Certificate == nil
 		// A name a site serves folds into it whatever the redirect does,
 		// so every name stays one item.
@@ -646,6 +659,9 @@ func foldRedirects(sites, redirects []VHost) []VHost {
 		for _, name := range unmatched {
 			if redirect.Certificate != nil || site.Certificate == nil || site.Certificate.covers(name) {
 				site.Aliases = append(site.Aliases, name)
+				if _, taken := index[name]; !taken {
+					index[name] = position
+				}
 			}
 		}
 	}

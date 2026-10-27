@@ -963,6 +963,15 @@ func TestFoldRedirects(t *testing.T) {
 			want:  []VHost{{Name: "example.com", Aliases: []string{"www.example.com"}, Ports: []int{443}, SSL: true, Certificate: siteCert}},
 		},
 		{
+			name: "an HTTPS redirect before the redirect to the preferred www name folds into the site",
+			items: []VHost{
+				{Name: "www.example.com", Ports: []int{443}, SSL: true, Certificate: siteCert},
+				redirect(VHost{Name: "www.example.com", Aliases: []string{"*.www.example.com", "example.com"}, Ports: []int{80}}, "https://$host$request_uri"),
+				redirect(VHost{Name: "example.com", Aliases: []string{"*.example.com"}, Ports: []int{443}, SSL: true, Certificate: siteCert}, "https://www.example.com$request_uri"),
+			},
+			want: []VHost{{Name: "example.com", Aliases: []string{"*.example.com", "www.example.com"}, Ports: []int{80, 443}, SSL: true, Certificate: siteCert, HTTPSRedirect: true}},
+		},
+		{
 			name:  "a redirect of a site's own name to elsewhere folds its port in",
 			items: []VHost{site(), redirect(VHost{Name: "example.com", Ports: []int{80}}, "https://example.net$request_uri")},
 			want:  []VHost{{Name: "example.com", Aliases: []string{}, Ports: []int{80, 443}, SSL: true, Certificate: siteCert}},
