@@ -382,7 +382,10 @@ func splitNEVRA(nevra string) (string, string, bool) {
 }
 
 // needsRestarting runs `needs-restarting -r` (yum-utils, dnf-utils):
-// exit status 1 means a reboot is required, 0 that it is not.
+// exit status 1 means a reboot is required, 0 that it is not. A crash
+// also exits with 1, so 1 only counts when the tool says a reboot is
+// required. CloudLinux mounts /proc with hidepid, which hides /proc/1,
+// where it reads the boot time, from the unprivileged agent.
 func (host *Host) needsRestarting(ctx context.Context) *bool {
 	command := host.findCommand("needs-restarting")
 	if command == "" {
@@ -397,6 +400,10 @@ func (host *Host) needsRestarting(ctx context.Context) *bool {
 		required := false
 		return &required
 	case 1:
+		output := string(result.Stdout) + string(result.Stderr)
+		if !strings.Contains(output, "Reboot is required") {
+			return nil
+		}
 		required := true
 		return &required
 	default:

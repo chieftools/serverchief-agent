@@ -224,6 +224,24 @@ func TestUpdatesWithoutManagerOrNeedsRestarting(t *testing.T) {
 	}
 }
 
+// On CloudLinux /proc is mounted with hidepid, so needs-restarting cannot
+// read the boot time from /proc/1 and crashes with exit status 1.
+func TestNeedsRestartingCrashIsUnknown(t *testing.T) {
+	host := &Host{
+		FS:  fstest.MapFS{"usr/bin/needs-restarting": {}},
+		Now: time.Now,
+		Command: func(context.Context, string, ...string) (CommandResult, error) {
+			return CommandResult{
+				Stderr:   []byte("No read/execute access in current directory, moving to /\n[Errno 2] No such file or directory: '/proc/1'\n"),
+				ExitCode: 1,
+			}, nil
+		},
+	}
+	if got := host.needsRestarting(context.Background()); got != nil {
+		t.Fatalf("reboot required = %v", *got)
+	}
+}
+
 // aptCacheHost is an apt host whose cache files have distinct mtimes.
 func aptCacheHost(now time.Time, files map[string]time.Time) *Host {
 	fsys := fstest.MapFS{"var/lib/dpkg/status": {}, "usr/bin/apt-get": {}}

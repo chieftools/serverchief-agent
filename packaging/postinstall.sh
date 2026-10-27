@@ -26,6 +26,26 @@ if ! getent passwd serverchief >/dev/null; then
         --no-create-home --shell "$nologin" --comment 'Server Chief agent' serverchief
 fi
 
+# Where /proc is mounted with hidepid (CloudLinux, hardened hosts) only the
+# group its gid= option names sees other users' processes; needs-restarting
+# reads the boot time from /proc/1. Their environment and memory stay
+# private. The upgrade restart below picks up the group.
+proc_gid="$(awk '$2 == "/proc" && $3 == "proc" && $4 ~ /(^|,)hidepid=/ {
+    n = split($4, options, ",")
+    for (i = 1; i <= n; i++) {
+        if (options[i] ~ /^gid=[0-9]+$/) {
+            print substr(options[i], 5)
+        }
+    }
+    exit
+}' /proc/mounts 2>/dev/null || true)"
+if [ -n "$proc_gid" ] && [ "$proc_gid" != 0 ]; then
+    proc_group="$(getent group "$proc_gid" | cut -d: -f1 || true)"
+    if [ -n "$proc_group" ] && ! id -nG serverchief | tr ' ' '\n' | grep -qx "$proc_group"; then
+        usermod -a -G "$proc_group" serverchief || true
+    fi
+fi
+
 state=/var/lib/serverchief
 override=/etc/systemd/system/serverchief.service
 template=/usr/share/serverchief/serverchief-root.service
