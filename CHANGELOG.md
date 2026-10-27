@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.2.6]
+
 ### Added
 
 - TransIP VPSs from before cloud-init, which carry no seed URL, are recognised too. When a QEMU guest without a known provider uses TransIP's apt mirror or resolvers, the agent asks TransIP's NoCloud seed once and reports TransIP only when it answers with this instance.
@@ -90,7 +92,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.6
 [0.2.5]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.5
 [0.2.4]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.4
 [0.2.3]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.3
