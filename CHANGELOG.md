@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.2.4]
+
 ### Fixed
 
 - A site whose HTTPS redirect is listed before its redirect to the preferred `www.` name, as Ploi writes them, is reported once. The HTTPS redirect was reported as a second item with the site's name, which replaced the site in Server Chief.
@@ -78,7 +80,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.4
 [0.2.3]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.3
 [0.2.2]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.2
 [0.2.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.1
