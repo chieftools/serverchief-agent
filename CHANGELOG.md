@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.2.5]
+
 ### Added
 
 - TransIP VPSs report TransIP as their cloud provider with their data centre (`ams0` or `rtm0`) as region and zone, read from the NoCloud meta-data TransIP serves each VPS at `pxe.frontend.transip.nl`. The agent recognises TransIP by the seed URL in the DMI serial or, as the unprivileged user that cannot read the serial, in the datasource cloud-init recorded on first boot.
@@ -84,7 +86,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.5
 [0.2.4]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.4
 [0.2.3]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.3
 [0.2.2]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.2
