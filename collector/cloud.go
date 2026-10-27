@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -171,6 +172,9 @@ func (collector *Cloud) Collect(ctx context.Context) (any, error) {
 
 	if provider == "" {
 		fields, ok := metadata.probe(ctx)
+		if !ok && host.transIPHinted() {
+			fields, ok = metadata.transIPProbe(ctx)
+		}
 		if ok {
 			info.setMetadata(fields)
 		}
@@ -235,6 +239,9 @@ func publicAddress(value string, ipv4 bool) *string {
 // not followed.
 const transIPSeedHost = "pxe.frontend.transip.nl"
 
+// transIPResolvers are the resolvers TransIP configures on its VPSs.
+var transIPResolvers = map[string]bool{"195.8.195.8": true, "195.135.195.135": true}
+
 // Azure publishes this asset tag on every VM; Hyper-V elsewhere has the
 // same vendor and product names.
 const azureAssetTag = "7783-7084-3265-9085-8269-3286-77"
@@ -283,6 +290,43 @@ func (host *Host) cloudFromDMI() string {
 func (host *Host) transIPSeeded(serial string) bool {
 	seed := "s=http://" + transIPSeedHost + "/"
 	return strings.Contains(serial, seed) || strings.Contains(strings.ToLower(host.readOptional("/var/lib/cloud/instance/datasource")), "seed=dmi,http://"+transIPSeedHost+"/")
+}
+
+// transIPHinted tells whether a QEMU guest without a TransIP seed may still
+// be a TransIP VPS: images from before cloud-init use TransIP's apt mirror
+// and resolvers. Anyone can use those, so only TransIP's seed answering
+// with this instance confirms it.
+func (host *Host) transIPHinted() bool {
+	if !strings.Contains(strings.ToLower(host.readOptional("/sys/class/dmi/id/sys_vendor")), "qemu") {
+		return false
+	}
+	for _, entry := range host.aptEntries() {
+		if parsed, err := url.Parse(entry.uri); err == nil && strings.EqualFold(parsed.Hostname(), "mirror.transip.net") {
+			return true
+		}
+	}
+	for _, file := range []string{"/etc/resolv.conf", "/run/systemd/resolve/resolv.conf"} {
+		if data, err := host.readFile(file); err == nil {
+			for _, nameserver := range parseResolvConf(data).nameservers {
+				if transIPResolvers[nameserver] {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// transIPProbe asks TransIP's seed, within ProbeTimeout, for this instance.
+func (metadata *Metadata) transIPProbe(ctx context.Context) (cloudFields, bool) {
+	timeout := metadata.ProbeTimeout
+	if timeout <= 0 {
+		timeout = metadataProbeTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	fields, err := metadata.transIP(ctx)
+	return fields, err == nil
 }
 
 // query reads the metadata of a provider that DMI identified.

@@ -344,6 +344,51 @@ func TestCloudTransIPFromDatasource(t *testing.T) {
 	}
 }
 
+// Images from before cloud-init carry no seed. TransIP's apt mirror or
+// resolvers on a QEMU guest only lead to asking the seed, which confirms the
+// instance; without it nothing is reported.
+func TestCloudTransIPFromHints(t *testing.T) {
+	cases := []struct {
+		name     string
+		vendor   string
+		files    map[string]string
+		seed     string
+		provider string
+		asked    bool
+	}{
+		{"apt mirror", "QEMU", map[string]string{"etc/apt/sources.list": "deb http://mirror.transip.net/ubuntu/ubuntu xenial main restricted\n"}, "transip", "transip", true},
+		{"resolvers", "QEMU", map[string]string{"etc/resolv.conf": "nameserver 195.8.195.8\nnameserver 195.135.195.135\n"}, "transip", "transip", true},
+		{"mirror elsewhere", "QEMU", map[string]string{"etc/apt/sources.list": "deb http://mirror.transip.net/ubuntu/ubuntu xenial main\n"}, "transip-other", "", true},
+		{"not qemu", "VMware, Inc.", map[string]string{"etc/apt/sources.list": "deb http://mirror.transip.net/ubuntu/ubuntu xenial main\n"}, "transip", "", false},
+		{"no hints", "QEMU", map[string]string{"etc/apt/sources.list": "deb http://archive.ubuntu.com/ubuntu jammy main\n"}, "transip", "", false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			server := newMetadataServer(t, metadataSpec{provider: test.seed})
+			host := dmiHost(map[string]string{"sys_vendor": test.vendor, "product_name": "Standard PC (i440FX + PIIX, 1996)"})
+			for name, data := range test.files {
+				host.FS.(fstest.MapFS)[name] = &fstest.MapFile{Data: []byte(data)}
+			}
+			host.Metadata = testMetadata(server.URL)
+			info := collectCloud(t, host)
+			provider := ""
+			if info.Provider != nil {
+				provider = *info.Provider
+			}
+			if provider != test.provider || (provider != "" && (*info.Zone != "rtm0" || *info.Source != CloudSourceMetadata)) {
+				t.Fatalf("info = %s", cloudJSON(t, info))
+			}
+			asked := false
+			for _, path := range server.paths() {
+				asked = asked || path == "GET /cloudinit/meta-data"
+			}
+			if asked != test.asked {
+				t.Fatalf("asked the TransIP seed = %v, requested %v", asked, server.paths())
+			}
+		})
+	}
+}
+
 func TestMetadataClientIgnoresProxyEnvironment(t *testing.T) {
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
 	t.Setenv("http_proxy", "http://127.0.0.1:1")

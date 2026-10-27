@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Added
+
+- TransIP VPSs from before cloud-init, which carry no seed URL, are recognised too. When a QEMU guest without a known provider uses TransIP's apt mirror or resolvers, the agent asks TransIP's NoCloud seed once and reports TransIP only when it answers with this instance.
+
 ## [0.2.5]
 
 ### Added
