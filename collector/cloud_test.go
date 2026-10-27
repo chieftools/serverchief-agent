@@ -75,7 +75,7 @@ func (server *metadataServer) paths() []string {
 
 func testMetadata(url string) *Metadata {
 	client := metadataHTTPClient(nil)
-	return &Metadata{Client: client, ScalewayClient: client, LinkLocalURL: url, GoogleURL: url, ScalewayURL: url, ProbeTimeout: 2 * time.Second, Timeout: 5 * time.Second}
+	return &Metadata{Client: client, ScalewayClient: client, LinkLocalURL: url, GoogleURL: url, ScalewayURL: url, TransIPURL: url + "/cloudinit", ProbeTimeout: 2 * time.Second, Timeout: 5 * time.Second}
 }
 
 func dmiHost(dmi map[string]string) *Host {
@@ -181,6 +181,12 @@ func TestCloudProviders(t *testing.T) {
 			dmi:  map[string]string{"sys_vendor": "Scaleway", "product_name": "SCW-DEV1-S"},
 			spec: metadataSpec{provider: "scaleway"},
 			want: `{"provider":"scaleway","source":"metadata","region":"fr-par","zone":"fr-par-1","instance_type":"DEV1-S","instance_id":"5d8b1f6c-3b2a-4c1d-9e8f-7a6b5c4d3e2f","public_ipv4":"51.15.0.10","public_ipv6":null}`,
+		},
+		{
+			name: "transip",
+			dmi:  map[string]string{"sys_vendor": "QEMU", "product_name": "Standard PC (i440FX + PIIX, 1996)", "product_serial": "ds=nocloud-net;s=http://pxe.frontend.transip.nl/cloudinit/"},
+			spec: metadataSpec{provider: "transip"},
+			want: `{"provider":"transip","source":"metadata","region":"rtm0","zone":"rtm0","instance_type":null,"instance_id":"0a1b2c3d-4e5f-6071-8293-0000a4b5c6d7","public_ipv4":null,"public_ipv6":null}`,
 		},
 	}
 	for _, test := range cases {
@@ -301,6 +307,8 @@ func TestCloudFromDMI(t *testing.T) {
 		{map[string]string{"sys_vendor": "QEMU", "product_name": "Standard PC (Q35 + ICH9, 2009)"}, "", ""},
 		{map[string]string{"sys_vendor": "OVH", "product_name": "OpenStack Nova"}, "", CloudOVH},
 		{map[string]string{"sys_vendor": "ASUSTeK COMPUTER INC.", "board_vendor": "ASUSTeK COMPUTER INC."}, "", ""}, // Hetzner dedicated
+		{map[string]string{"sys_vendor": "QEMU", "product_serial": "ds=nocloud-net;s=http://pxe.frontend.transip.nl/cloudinit/"}, "", CloudTransIP},
+		{map[string]string{"sys_vendor": "QEMU", "product_serial": "ds=nocloud-net;s=http://seed.example.com/pxe.frontend.transip.nl/"}, "", ""},
 	}
 	for _, test := range cases {
 		host := dmiHost(test.dmi)
@@ -310,6 +318,29 @@ func TestCloudFromDMI(t *testing.T) {
 		if got := host.cloudFromDMI(); got != test.want {
 			t.Errorf("%v = %q, want %q", test.dmi, got, test.want)
 		}
+	}
+}
+
+// The unprivileged agent cannot read the DMI serial, the datasource cloud-init
+// recorded names the TransIP seed instead. Only TransIP's own response with
+// the instance counts: anywhere else the seed answers without it.
+func TestCloudTransIPFromDatasource(t *testing.T) {
+	host := dmiHost(map[string]string{"sys_vendor": "QEMU", "product_name": "Standard PC (i440FX + PIIX, 1996)"})
+	host.FS.(fstest.MapFS)["var/lib/cloud/instance/datasource"] = &fstest.MapFile{Data: []byte("DataSourceNoCloudNet: DataSourceNoCloudNet [seed=dmi,http://pxe.frontend.transip.nl/cloudinit/]\n")}
+	server := newMetadataServer(t, metadataSpec{provider: "transip"})
+	host.Metadata = testMetadata(server.URL)
+	if info := collectCloud(t, host); info.Zone == nil || *info.Zone != "rtm0" {
+		t.Fatalf("info = %s", cloudJSON(t, info))
+	}
+	if paths := server.paths(); len(paths) != 1 || paths[0] != "GET /cloudinit/meta-data" {
+		t.Fatalf("requested %v", paths)
+	}
+
+	other := newMetadataServer(t, metadataSpec{provider: "transip-other"})
+	host.Metadata = testMetadata(other.URL)
+	want := `{"provider":"transip","source":"dmi","region":null,"zone":null,"instance_type":null,"instance_id":null,"public_ipv4":null,"public_ipv6":null}`
+	if got := cloudJSON(t, collectCloud(t, host)); got != want {
+		t.Fatalf("seed without the instance: %s", got)
 	}
 }
 

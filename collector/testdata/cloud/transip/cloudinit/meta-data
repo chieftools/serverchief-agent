@@ -1,0 +1,4 @@
+platform: nocloud
+instance-id: 0a1b2c3d-4e5f-6071-8293-0000a4b5c6d7
+availability_zone: rtm0
+region: nl

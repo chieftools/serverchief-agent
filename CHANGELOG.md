@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Added
+
+- TransIP VPSs report TransIP as their cloud provider with their data centre (`ams0` or `rtm0`) as region and zone, read from the NoCloud meta-data TransIP serves each VPS at `pxe.frontend.transip.nl`. The agent recognises TransIP by the seed URL in the DMI serial or, as the unprivileged user that cannot read the serial, in the datasource cloud-init recorded on first boot.
+
 ## [0.2.4]
 
 ### Fixed

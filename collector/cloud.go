@@ -28,6 +28,7 @@ const (
 	CloudLinode       = "linode"
 	CloudScaleway     = "scaleway"
 	CloudOpenStack    = "openstack"
+	CloudTransIP      = "transip"
 )
 
 // Cloud sources.
@@ -74,6 +75,9 @@ type Metadata struct {
 	LinkLocalURL string
 	GoogleURL    string
 	ScalewayURL  string
+	// TransIPURL is the base of the NoCloud seed TransIP names in DMI and
+	// the cloud-init datasource; it answers each VPS by its source address.
+	TransIPURL string
 	// ProbeTimeout bounds the whole probe when DMI names no provider.
 	ProbeTimeout time.Duration
 	// Timeout bounds the queries to a provider that DMI identified.
@@ -88,7 +92,8 @@ const (
 )
 
 // NewMetadata returns the client for the real metadata services. Proxies
-// from the environment are never used: the services are link-local.
+// from the environment are never used: the services are link-local, or
+// like TransIP's only answer the host's own address.
 func NewMetadata() *Metadata {
 	return &Metadata{
 		Client:         metadataHTTPClient(nil),
@@ -96,6 +101,7 @@ func NewMetadata() *Metadata {
 		LinkLocalURL:   "http://169.254.169.254",
 		GoogleURL:      "http://metadata.google.internal",
 		ScalewayURL:    "http://169.254.42.42",
+		TransIPURL:     "http://" + transIPSeedHost + "/cloudinit",
 		ProbeTimeout:   metadataProbeTimeout,
 		Timeout:        metadataTimeout,
 	}
@@ -224,6 +230,11 @@ func publicAddress(value string, ipv4 bool) *string {
 	return &text
 }
 
+// transIPSeedHost serves TransIP's NoCloud seed. Only this host is ever
+// requested: the seed URL in DMI or the datasource identifies TransIP, it is
+// not followed.
+const transIPSeedHost = "pxe.frontend.transip.nl"
+
 // Azure publishes this asset tag on every VM; Hyper-V elsewhere has the
 // same vendor and product names.
 const azureAssetTag = "7783-7084-3265-9085-8269-3286-77"
@@ -259,8 +270,19 @@ func (host *Host) cloudFromDMI() string {
 		return CloudOVH
 	case strings.Contains(all, "openstack"):
 		return CloudOpenStack
+	case host.transIPSeeded(read("product_serial")):
+		return CloudTransIP
 	}
 	return ""
+}
+
+// transIPSeeded tells whether cloud-init seeds this host from TransIP. The
+// DMI serial names the seed but only root may read it, so the datasource
+// cloud-init recorded on first boot, which stays readable after cloud-init
+// is disabled, names it for the unprivileged agent.
+func (host *Host) transIPSeeded(serial string) bool {
+	seed := "s=http://" + transIPSeedHost + "/"
+	return strings.Contains(serial, seed) || strings.Contains(strings.ToLower(host.readOptional("/var/lib/cloud/instance/datasource")), "seed=dmi,http://"+transIPSeedHost+"/")
 }
 
 // query reads the metadata of a provider that DMI identified.
@@ -290,6 +312,8 @@ func (metadata *Metadata) query(ctx context.Context, provider string) (cloudFiel
 		return metadata.linode(ctx)
 	case CloudScaleway:
 		return metadata.scaleway(ctx)
+	case CloudTransIP:
+		return metadata.transIP(ctx)
 	}
 	return cloudFields{}, fmt.Errorf("unknown provider %q", provider)
 }
@@ -400,6 +424,28 @@ func (metadata *Metadata) hetzner(ctx context.Context) (cloudFields, error) {
 		fields.region = location
 	}
 	return fields, nil
+}
+
+// transIP reads the NoCloud meta-data TransIP serves each VPS: top-level
+// scalars of which "region" is the country (nl) and the availability zone
+// the data centre (ams0, rtm0), which is reported as the region too.
+func (metadata *Metadata) transIP(ctx context.Context) (cloudFields, error) {
+	document, err := metadata.get(ctx, metadata.TransIPURL+"/meta-data", nil)
+	if err != nil {
+		return cloudFields{}, err
+	}
+	values := yamlScalars(document)
+	zone := strings.ToLower(values["availability_zone"])
+	if values["instance-id"] == "" || zone == "" {
+		// Any other address gets a document without the instance.
+		return cloudFields{}, &metadataStatusError{url: "/cloudinit/meta-data", status: http.StatusNoContent}
+	}
+	return cloudFields{
+		provider:   CloudTransIP,
+		region:     zone,
+		zone:       zone,
+		instanceID: values["instance-id"],
+	}, nil
 }
 
 // yamlScalars returns the unindented "key: value" lines of a YAML
