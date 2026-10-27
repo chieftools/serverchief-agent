@@ -9,6 +9,14 @@ release.
 
 ## [Unreleased]
 
+### Changed
+
+- Where `/proc` is mounted with `hidepid`, such as on CloudLinux, the package adds the `serverchief` user to the group its `gid=` option names, so the agent sees every process as it does on other hosts and `needs-restarting -r` can tell whether a reboot is required.
+
+### Fixed
+
+- RHEL-family servers no longer report a required reboot when `needs-restarting -r` fails instead of answering. On CloudLinux, which mounts `/proc` with `hidepid`, the tool cannot read the boot time as the unprivileged agent and crashes with the same exit status as a required reboot; the reboot flag is now reported as unknown.
+
 ## [0.2.2]
 
 ### Added
