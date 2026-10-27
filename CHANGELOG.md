@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Fixed
+
+- A site whose HTTPS redirect is listed before its redirect to the preferred `www.` name, as Ploi writes them, is reported once. The HTTPS redirect was reported as a second item with the site's name, which replaced the site in Server Chief.
+
 ## [0.2.3]
 
 ### Changed
