@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.VERSION }}
     steps:
@@ -93,9 +93,7 @@ jobs:
   publish:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
-    # The rpm of Ubuntu 26.04 no longer signs into the RSAHEADER tag that
-    # the rpm of EL7 and EL8 verifies, see bin/sign-packages.sh.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     concurrency: package-publication
     permissions:
       contents: write

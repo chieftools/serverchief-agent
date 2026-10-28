@@ -132,8 +132,12 @@ ${PREREMOVE}
 ${POSTREMOVE}
 EOF2
 
+# rpm 6 builds v6 packages by default, and signing those leaves out the
+# RSAHEADER signature that the rpm of EL7 and EL8 verifies. Older rpm ignores
+# the macro.
 rpmbuild --define "_topdir ${RPMBUILD_DIR}" \
     --define "_tmppath ${BUILD_DIR}" \
+    --define '_rpmformat 4' \
     --define '_binary_payload w9.gzdio' \
     --define '_buildhost reproducible' \
     --define 'use_source_date_epoch_as_buildtime 1' \
