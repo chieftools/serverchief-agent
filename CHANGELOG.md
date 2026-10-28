@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.3.0]
+
 ### Added
 
 - The `applications` dataset lists the web applications the sites serve: WordPress with its plugins and themes, Laravel, Symfony and other Composer or npm projects, with the packages of their lockfiles. Only the application's own lockfiles and the version headers WordPress reads are read; configuration files such as `wp-config.php` and `.env` are never opened. The backend enables it.
@@ -113,7 +115,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.8...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.3.0
 [0.2.8]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.8
 [0.2.7]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.7
 [0.2.6]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.6
