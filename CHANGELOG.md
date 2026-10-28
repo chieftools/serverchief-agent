@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.2.8]
+
 ### Changed
 
 - Updated dependencies and Go to 1.27.3.
@@ -107,7 +109,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.7...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.8
 [0.2.7]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.7
 [0.2.6]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.6
 [0.2.5]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.5
