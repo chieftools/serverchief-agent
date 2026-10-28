@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Added
+
+- The `applications` dataset lists the web applications the sites serve: WordPress with its plugins and themes, Laravel, Symfony and other Composer or npm projects, with the packages of their lockfiles. Only the application's own lockfiles and the version headers WordPress reads are read; configuration files such as `wp-config.php` and `.env` are never opened. The backend enables it.
+
 ## [0.2.8]
 
 ### Changed

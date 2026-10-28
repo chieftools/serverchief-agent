@@ -38,6 +38,9 @@ var DefaultIntervals = map[string]time.Duration{
 	// files or apt's lists change, after a metadata refresh and after
 	// package activity.
 	"repositories": time.Hour,
+	// applications is also collected early when a lockfile, WordPress or
+	// its plugin and theme directories change.
+	"applications": time.Hour,
 	// cloud is also collected at agent start, like every enabled dataset.
 	"cloud": 24 * time.Hour,
 }

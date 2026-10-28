@@ -54,8 +54,8 @@ func NewRegistry() *Registry {
 }
 
 // Default returns a registry with every built-in collector bound to host.
-// packages, repositories, updates, cloud, vhosts and certificates are optional: they are
-// collected only when selected explicitly or enabled by the backend.
+// packages, repositories, updates, cloud, vhosts, certificates and applications are
+// optional: they are collected only when selected explicitly or enabled by the backend.
 func Default(host *Host) *Registry {
 	registry := NewRegistry()
 	registry.MustRegister(NewSystem(host))
@@ -72,6 +72,8 @@ func Default(host *Host) *Registry {
 	registry.MustRegisterOptional(vhosts)
 	// certificates reuses the sites and parsed certificate files of vhosts.
 	registry.MustRegisterOptional(NewCertificates(host, vhosts))
+	// applications finds the applications at the sites' document roots.
+	registry.MustRegisterOptional(NewApplications(host, vhosts))
 	return registry
 }
 
