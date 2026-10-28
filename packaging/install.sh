@@ -117,6 +117,11 @@ refresh_apt_source() {
 install_apt() {
     echo "Setting up the Server Chief repository for Debian/Ubuntu..."
 
+    # Keep apt and its hooks from prompting, as the agent's updater does.
+    # Piped into bash, nobody can answer a dialog such as needrestart's
+    # "Pending kernel upgrade", and reading stdin would eat this script.
+    export DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none NEEDRESTART_SUSPEND=1
+
     APT_VERSION="$(dpkg-query -W -f='${Version}' apt 2>/dev/null || true)"
     REPOSITORY_URL="${PACKAGE_BASE_URL}"
 
@@ -126,7 +131,7 @@ install_apt() {
         if ! apt-get update; then
             echo "apt-get update reported errors; continuing because unrelated repositories may be broken."
         fi
-        if ! DEBIAN_FRONTEND=noninteractive apt-get install -y apt-transport-https ca-certificates; then
+        if ! apt-get install -y apt-transport-https ca-certificates < /dev/null; then
             echo "Could not install apt-transport-https; apt will use the repository over HTTP."
             REPOSITORY_URL="http://${PACKAGE_BASE_URL#https://}"
         fi
@@ -161,7 +166,7 @@ install_apt() {
         fi
     fi
 
-    DEBIAN_FRONTEND=noninteractive apt-get install -y serverchief
+    apt-get install -y serverchief < /dev/null
 }
 
 install_rpm() {
