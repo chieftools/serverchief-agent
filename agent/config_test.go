@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/x509roots/fallback/bundle"
 )
 
 func writeConfig(t *testing.T, content string) string {
@@ -116,12 +118,25 @@ func TestValidEndpoint(t *testing.T) {
 
 func TestRootCAsIncludesEmbeddedBundle(t *testing.T) {
 	pool := RootCAs()
-	system, err := x509.SystemCertPool()
-	if err != nil {
-		system = x509.NewCertPool()
+	if pool == nil {
+		t.Fatal("RootCAs() returned nil")
 	}
-	if pool == nil || pool.Equal(system) {
-		t.Fatal("RootCAs() did not add the embedded roots")
+	for root := range bundle.Roots() {
+		if root.Constraint != nil {
+			continue
+		}
+		certificate, err := x509.ParseCertificate(root.Certificate)
+		if err != nil {
+			continue
+		}
+		options := x509.VerifyOptions{
+			Roots:       pool,
+			CurrentTime: certificate.NotBefore,
+			KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+		}
+		if _, err := certificate.Verify(options); err != nil {
+			t.Fatalf("RootCAs() does not trust embedded root %s: %v", certificate.Subject, err)
+		}
 	}
 	client, err := NewHTTPClient("")
 	if err != nil || client.Timeout == 0 {
