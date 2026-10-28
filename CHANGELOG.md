@@ -12,6 +12,7 @@ release.
 ### Fixed
 
 - `install.sh` on Ubuntu no longer stops at needrestart's "Pending kernel upgrade" dialog, which cannot be answered when the script is piped into bash. The installer now skips needrestart, as the agent's updater already did.
+- The agent reconnects to realtime when its channel subscription fails, is rejected or is not confirmed within 30 seconds, and when the connection goes silent for longer than the activity timeout plus 30 seconds. Before, a rejected or unconfirmed subscription left the agent connected but unsubscribed, so it only picked up commands and config changes on its heartbeat, and a dead connection could go unnoticed for about 15 minutes. Reconnects now back off from 2 seconds up to 5 minutes until a subscription succeeds, instead of starting over at 2 seconds on every connection, so a channel authorization that keeps failing is no longer retried every few seconds.
 
 ## [0.2.7]
 

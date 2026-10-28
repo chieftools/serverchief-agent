@@ -23,7 +23,9 @@ const (
 	websocketCloseTimeout     = 2 * time.Second
 	defaultReconnectDelay     = 2 * time.Second
 	maximumReconnectDelay     = 5 * time.Minute
-	defaultActivityTimeout    = 60
+	defaultActivityTimeout    = 120 * time.Second
+	defaultPongTimeout        = 30 * time.Second
+	subscriptionTimeout       = 30 * time.Second
 	maximumMessageBytes       = 1 << 20
 
 	// DefaultClientName identifies the agent to the Pusher server when
@@ -93,17 +95,25 @@ type Client struct {
 	conn           *websocket.Conn
 	socketID       string
 	isConnected    bool
+	isSubscribed   bool
 	isConnecting   bool
 	connectCancel  context.CancelFunc
 	generation     uint64
 	reconnectTimer *time.Timer
 	reconnectDelay time.Duration
+	readTimeout    time.Duration
 	stopChan       chan struct{}
 	eventHandlers  map[string]MessageHandler
 	mu             sync.RWMutex
 	writeMu        sync.Mutex
 	pingTicker     *time.Ticker
 	pingStop       chan struct{}
+
+	// Timeouts are fields so tests can shorten them.
+	pongTimeout           time.Duration
+	subscribeTimeout      time.Duration
+	minimumReconnectDelay time.Duration
+	reconnectDelayCap     time.Duration
 }
 
 // NewClient creates a Realtime client.
@@ -125,6 +135,11 @@ func NewClient(config *Config, userAgent, credential, protocol string, httpClien
 		stopChan:       make(chan struct{}),
 		eventHandlers:  make(map[string]MessageHandler),
 		reconnectDelay: defaultReconnectDelay,
+
+		pongTimeout:           defaultPongTimeout,
+		subscribeTimeout:      subscriptionTimeout,
+		minimumReconnectDelay: defaultReconnectDelay,
+		reconnectDelayCap:     maximumReconnectDelay,
 	}
 }
 
@@ -211,11 +226,12 @@ func (c *Client) Connect() error {
 	connection.SetReadLimit(maximumMessageBytes)
 	c.socketID = ""
 	c.isConnected = false
+	c.isSubscribed = false
+	c.readTimeout = defaultActivityTimeout + c.pongTimeout
 	if c.reconnectTimer != nil {
 		c.reconnectTimer.Stop()
 		c.reconnectTimer = nil
 	}
-	c.reconnectDelay = defaultReconnectDelay
 	c.mu.Unlock()
 
 	log.Printf("[realtime] Connected to %s", config.Host)
@@ -230,6 +246,14 @@ func (c *Client) IsConnected() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.isConnected
+}
+
+// IsSubscribed reports whether the server confirmed the channel subscription
+// on the current connection.
+func (c *Client) IsSubscribed() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.isSubscribed
 }
 
 // OnEvent registers a handler for an event type.
@@ -268,6 +292,7 @@ func (c *Client) disconnect(reason string) {
 	}
 
 	c.isConnected = false
+	c.isSubscribed = false
 	c.isConnecting = false
 	c.config = nil
 	c.mu.Unlock()
@@ -318,6 +343,7 @@ func (c *Client) handleMessages(conn *websocket.Conn) {
 			c.conn = nil
 			c.socketID = ""
 			c.isConnected = false
+			c.isSubscribed = false
 			c.stopPingTickerLocked()
 			shouldReconnect = !c.isStoppedLocked() && c.config != nil
 		}
@@ -341,6 +367,18 @@ func (c *Client) handleMessages(conn *websocket.Conn) {
 		case <-c.stopChan:
 			return
 		default:
+		}
+
+		// Every ping is answered, so silence beyond the activity timeout plus
+		// the pong timeout means the connection is dead.
+		c.mu.RLock()
+		readTimeout := c.readTimeout
+		c.mu.RUnlock()
+		if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+			if c.isConnectionActive(conn) {
+				log.Printf("[realtime] Failed to set read deadline: %v", err)
+			}
+			return
 		}
 
 		var message Message
@@ -370,6 +408,11 @@ func (c *Client) handlePusherMessage(conn *websocket.Conn, message Message) {
 	case "pusher:connection_established":
 		var data ConnectionEstablishedMessageData
 		if err := message.UnmarshalData(&data); err == nil {
+			activityTimeout := defaultActivityTimeout
+			if data.ActivityTimeout > 0 {
+				activityTimeout = time.Duration(data.ActivityTimeout) * time.Second
+			}
+
 			c.mu.Lock()
 			if c.conn != conn || c.isStoppedLocked() {
 				c.mu.Unlock()
@@ -377,19 +420,40 @@ func (c *Client) handlePusherMessage(conn *websocket.Conn, message Message) {
 			}
 			c.socketID = data.SocketID
 			c.isConnected = true
+			c.readTimeout = activityTimeout + c.pongTimeout
+			subscribeTimeout := c.subscribeTimeout
+			channel := ""
+			if c.config != nil {
+				channel = c.config.Channel
+			}
 			c.mu.Unlock()
 
 			if c.verbose {
 				log.Printf("[realtime] Connection established, socket ID: %s @ colo: %s", data.SocketID, data.SocketChiefColo)
 			}
 
-			c.startPingTicker(conn, data.ActivityTimeout)
+			c.startPingTicker(conn, activityTimeout)
 
+			if channel == "" {
+				log.Printf("[realtime] No channel configured, not subscribing")
+				return
+			}
+
+			// A connection that is not subscribed receives no events, so any
+			// subscription failure reconnects.
 			go func() {
 				if err := c.subscribeToChannel(conn, data.SocketID); err != nil {
-					log.Printf("[realtime] Failed to subscribe to channel: %v", err)
+					c.failConnection(conn, fmt.Sprintf("failed to subscribe to channel: %v", err))
 				}
 			}()
+			time.AfterFunc(subscribeTimeout, func() {
+				c.mu.RLock()
+				pending := c.conn == conn && !c.isSubscribed
+				c.mu.RUnlock()
+				if pending {
+					c.failConnection(conn, fmt.Sprintf("channel subscription not confirmed within %s", subscribeTimeout))
+				}
+			})
 		} else {
 			log.Printf("[realtime] Failed to parse connection established data: %v", err)
 		}
@@ -405,10 +469,20 @@ func (c *Client) handlePusherMessage(conn *websocket.Conn, message Message) {
 	case "pusher:error":
 		log.Printf("[realtime] Received error: %s", string(message.Data))
 
+	case "pusher:subscription_error":
+		c.failConnection(conn, fmt.Sprintf("channel subscription rejected: %s", string(message.Data)))
+
 	case "pusher_internal:subscription_succeeded":
-		if c.verbose {
-			log.Printf("[realtime] Successfully subscribed to channel: %s", message.Channel)
+		c.mu.Lock()
+		if c.conn != conn || c.isStoppedLocked() || c.config == nil || message.Channel != c.config.Channel {
+			c.mu.Unlock()
+			return
 		}
+		c.isSubscribed = true
+		c.reconnectDelay = c.minimumReconnectDelay
+		c.mu.Unlock()
+
+		log.Printf("[realtime] Subscribed to channel: %s", message.Channel)
 		c.notifyEventListeners(message)
 
 	default:
@@ -418,12 +492,8 @@ func (c *Client) handlePusherMessage(conn *websocket.Conn, message Message) {
 	}
 }
 
-func (c *Client) startPingTicker(conn *websocket.Conn, activityTimeout int) {
-	if activityTimeout <= 0 {
-		activityTimeout = defaultActivityTimeout
-	}
-
-	ticker := time.NewTicker(time.Duration(activityTimeout) * time.Second)
+func (c *Client) startPingTicker(conn *websocket.Conn, activityTimeout time.Duration) {
+	ticker := time.NewTicker(activityTimeout)
 	stop := make(chan struct{})
 
 	c.mu.Lock()
@@ -524,7 +594,6 @@ func (c *Client) subscribeToChannel(conn *websocket.Conn, socketID string) error
 			auth, err = c.generateChannelAuth(socketID, config.Channel, config.AuthURL, credential, userAgent, protocol)
 		}
 		if err != nil {
-			c.closeWebSocket(conn, websocket.ClosePolicyViolation, "channel authorization failed")
 			return fmt.Errorf("failed to generate auth: %w", err)
 		}
 
@@ -613,6 +682,29 @@ func (c *Client) notifyEventListeners(message Message) bool {
 	return handled
 }
 
+// failConnection closes a connection that cannot deliver events and schedules
+// a reconnect, unless the connection was already replaced or closed.
+func (c *Client) failConnection(conn *websocket.Conn, reason string) {
+	c.mu.Lock()
+	if c.conn != conn || c.isStoppedLocked() {
+		c.mu.Unlock()
+		return
+	}
+	c.conn = nil
+	c.socketID = ""
+	c.isConnected = false
+	c.isSubscribed = false
+	c.stopPingTickerLocked()
+	c.mu.Unlock()
+
+	log.Printf("[realtime] %s, reconnecting", reason)
+	c.closeWebSocket(conn, websocket.ClosePolicyViolation, "channel subscription failed")
+	c.scheduleReconnect()
+}
+
+// scheduleReconnect schedules a reconnection attempt with exponential backoff.
+// The backoff only resets once a subscription succeeds, so a server that
+// accepts connections but rejects subscriptions is not retried in a tight loop.
 func (c *Client) scheduleReconnect() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -625,10 +717,10 @@ func (c *Client) scheduleReconnect() {
 		c.reconnectTimer.Stop()
 	}
 
-	delay := fullJitter(c.reconnectDelay)
+	delay := upperHalfJitter(c.reconnectDelay)
 	c.reconnectDelay *= 2
-	if c.reconnectDelay > maximumReconnectDelay {
-		c.reconnectDelay = maximumReconnectDelay
+	if c.reconnectDelay > c.reconnectDelayCap {
+		c.reconnectDelay = c.reconnectDelayCap
 	}
 	generation := c.generation
 
@@ -651,15 +743,18 @@ func (c *Client) scheduleReconnect() {
 	})
 }
 
-func fullJitter(maximum time.Duration) time.Duration {
+// upperHalfJitter returns a random delay between half of maximum and maximum,
+// so reconnects are spread out but never immediate.
+func upperHalfJitter(maximum time.Duration) time.Duration {
 	if maximum <= 0 {
 		return 0
 	}
-	value, err := rand.Int(rand.Reader, big.NewInt(int64(maximum)+1))
+	half := maximum / 2
+	value, err := rand.Int(rand.Reader, big.NewInt(int64(maximum-half)+1))
 	if err != nil {
 		return maximum
 	}
-	return time.Duration(value.Int64())
+	return half + time.Duration(value.Int64())
 }
 
 func (c *Client) closeWebSocket(conn *websocket.Conn, code int, reason string) {
