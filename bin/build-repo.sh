@@ -121,9 +121,11 @@ for RPM_ARCH in x86_64 aarch64; do
     mkdir -p "${REPO_DIR}"
     cp "${PACKAGES_ROOT}/${RPM_FILE}" "${REPO_DIR}/"
 
+    # Compress the metadata with gzip: createrepo_c 1.0 and later default to
+    # zstd, which the yum of EL7 cannot read.
     if [ "${REBUILD_RPM_REPO:-false}" = "true" ]; then
         # Full rebuild: all RPM files are present, generate fresh metadata
-        createrepo_c "${REPO_DIR}"
+        createrepo_c --general-compress-type=gz "${REPO_DIR}"
     else
         # Check if existing repo metadata exists for incremental update
         OLD_PRIMARY=$(find "${REPO_DIR}/repodata" -name "*-primary.xml.gz" 2>/dev/null | head -1)
@@ -133,10 +135,10 @@ for RPM_ARCH in x86_64 aarch64; do
             gunzip -c "${OLD_PRIMARY}" | grep -oP 'href="\K[^"]+' | while read -r rpm; do
                 [ -f "${REPO_DIR}/${rpm}" ] || touch "${REPO_DIR}/${rpm}"
             done
-            createrepo_c --update --skip-stat "${REPO_DIR}"
+            createrepo_c --general-compress-type=gz --update --skip-stat "${REPO_DIR}"
         else
             # No existing metadata (new architecture), create fresh repo
-            createrepo_c "${REPO_DIR}"
+            createrepo_c --general-compress-type=gz "${REPO_DIR}"
         fi
     fi
 
