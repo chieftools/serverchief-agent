@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.3.1]
+
 ### Fixed
 
 - Fixed CentOS 7 and other EL7 servers failing to read the Server Chief RPM repository with "Parsing primary.xml error: Start tag expected". The repository metadata was compressed with zstd, which the yum of EL7 cannot read, and is gzip compressed again from the next release on.
@@ -119,7 +121,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.3.1
 [0.3.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.3.0
 [0.2.8]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.8
 [0.2.7]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.7
