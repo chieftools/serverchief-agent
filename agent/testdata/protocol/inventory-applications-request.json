@@ -1,0 +1,183 @@
+{
+  "collected_at": "2026-10-28T12:00:00Z",
+  "datasets": {
+    "applications": {
+      "hash": "2144f336a3729b149bfc481bd7af29921f5c9c0843e6ce8a75a7f9ee7ee70e25",
+      "mode": "full",
+      "payload": {
+        "items": [
+          {
+            "kind": "laravel",
+            "lockfiles": [
+              "composer.lock",
+              "package-lock.json"
+            ],
+            "owner": "forge",
+            "packages": [
+              {
+                "dev": false,
+                "direct": false,
+                "ecosystem": "composer",
+                "name": "guzzlehttp/guzzle",
+                "version": "7.9.2"
+              },
+              {
+                "dev": false,
+                "direct": true,
+                "ecosystem": "composer",
+                "name": "laravel/framework",
+                "version": "v11.9.2"
+              },
+              {
+                "dev": true,
+                "direct": true,
+                "ecosystem": "composer",
+                "name": "phpunit/phpunit",
+                "version": "11.3.1"
+              },
+              {
+                "dev": false,
+                "direct": true,
+                "ecosystem": "npm",
+                "name": "axios",
+                "version": "1.7.7"
+              },
+              {
+                "dev": true,
+                "direct": false,
+                "ecosystem": "npm",
+                "name": "esbuild",
+                "version": "0.21.5"
+              },
+              {
+                "dev": false,
+                "direct": false,
+                "ecosystem": "npm",
+                "name": "follow-redirects",
+                "version": "1.15.9"
+              },
+              {
+                "dev": true,
+                "direct": true,
+                "ecosystem": "npm",
+                "name": "vite",
+                "version": "5.4.8"
+              }
+            ],
+            "path": "/home/forge/shop.test/current",
+            "sites": [
+              "nginx/admin.shop.test",
+              "nginx/shop.test"
+            ],
+            "truncated": false,
+            "version": "11.9.2",
+            "wordpress": null
+          },
+          {
+            "kind": "wordpress",
+            "lockfiles": [
+              "composer.lock"
+            ],
+            "owner": null,
+            "packages": [
+              {
+                "dev": false,
+                "direct": true,
+                "ecosystem": "composer",
+                "name": "roots/wordpress",
+                "version": "6.6.1"
+              },
+              {
+                "dev": false,
+                "direct": false,
+                "ecosystem": "composer",
+                "name": "vlucas/phpdotenv",
+                "version": "v5.6.1"
+              },
+              {
+                "dev": false,
+                "direct": true,
+                "ecosystem": "composer",
+                "name": "wpackagist-plugin/akismet",
+                "version": "5.3.3"
+              }
+            ],
+            "path": "/var/www/vhosts/bedrock.test/site",
+            "sites": [
+              "nginx/bedrock.test"
+            ],
+            "truncated": false,
+            "version": "6.6.1",
+            "wordpress": {
+              "plugins": [
+                {
+                  "must_use": false,
+                  "name": "Akismet Anti-spam",
+                  "slug": "akismet",
+                  "version": "5.3.3"
+                }
+              ],
+              "themes": []
+            }
+          },
+          {
+            "kind": "wordpress",
+            "lockfiles": [],
+            "owner": null,
+            "packages": [],
+            "path": "/var/www/vhosts/blog.test/httpdocs",
+            "sites": [
+              "nginx/blog.test"
+            ],
+            "truncated": false,
+            "version": "6.6.2",
+            "wordpress": {
+              "plugins": [
+                {
+                  "must_use": false,
+                  "name": "Hello Dolly",
+                  "slug": "hello",
+                  "version": "1.7.2"
+                },
+                {
+                  "must_use": false,
+                  "name": "WooCommerce",
+                  "slug": "woocommerce",
+                  "version": "9.3.1"
+                },
+                {
+                  "must_use": true,
+                  "name": null,
+                  "slug": "loader",
+                  "version": null
+                }
+              ],
+              "themes": [
+                {
+                  "name": "Agency",
+                  "parent": null,
+                  "slug": "bundle/agency",
+                  "version": "2.0.1"
+                },
+                {
+                  "name": "Child",
+                  "parent": "twentytwentyfour",
+                  "slug": "child",
+                  "version": null
+                },
+                {
+                  "name": "Twenty Twenty-Four",
+                  "parent": null,
+                  "slug": "twentytwentyfour",
+                  "version": "1.2"
+                }
+              ]
+            }
+          }
+        ],
+        "truncated": false
+      }
+    }
+  },
+  "seq": 1
+}

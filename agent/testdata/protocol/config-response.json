@@ -1,5 +1,6 @@
 {
   "datasets": [
+    "applications",
     "certificates",
     "cloud",
     "hardware",
@@ -14,6 +15,7 @@
   "etag": "\"c1-5f3a9e\"",
   "intervals": {
     "datasets": {
+      "applications": 3600,
       "certificates": 3600,
       "cloud": 86400,
       "hardware": 3600,

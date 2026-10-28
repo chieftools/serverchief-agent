@@ -1,6 +1,7 @@
 {
   "config_etag": "\"c1-5f3a9e\"",
   "datasets": [
+    "applications",
     "certificates",
     "cloud",
     "hardware",
@@ -16,6 +17,7 @@
   "generation": 1,
   "intervals": {
     "datasets": {
+      "applications": 3600,
       "certificates": 3600,
       "cloud": 86400,
       "hardware": 3600,
