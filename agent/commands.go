@@ -257,6 +257,11 @@ func (daemon *daemon) recoverCommands(now time.Time) {
 			if record.Kind == CommandReboot {
 				continue
 			}
+			if record.Kind == CommandUpgradePackages {
+				log.Printf("[commands] %s %s is with the package upgrade helper; waiting for its result", record.Kind, record.ID)
+				daemon.upgrade.active, daemon.upgrade.pollAt, daemon.upgrade.resumeDue = true, now, true
+				continue
+			}
 			log.Printf("[commands] %s %s is with the update helper; waiting for its result", record.Kind, record.ID)
 			daemon.update.active = true
 			daemon.update.inProgress = true
@@ -423,6 +428,8 @@ func (daemon *daemon) execute(record commandRecord) {
 		daemon.startUpdate(record)
 	case CommandReboot:
 		daemon.startReboot(record)
+	case CommandUpgradePackages:
+		daemon.startUpgrade(record)
 	case CommandRefreshConfig:
 		log.Printf("[commands] %s %s: fetching the configuration", record.Kind, record.ID)
 		daemon.configPending = true

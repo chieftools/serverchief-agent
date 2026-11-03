@@ -22,7 +22,8 @@ KillMode=mixed
 # The serverchief user reads the host with CAP_DAC_READ_SEARCH (package
 # databases, vhost configs, panel data) but cannot write anything outside
 # its own directories. The few things that need root (refreshing package
-# lists, reading the Plesk database, installing an agent update, rebooting)
+# lists, reading the Plesk database, installing an agent update, rebooting,
+# installing package updates)
 # go through serverchief-helper.service, which only runs a fixed list of
 # actions.
 User=serverchief

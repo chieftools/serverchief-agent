@@ -22,8 +22,8 @@ func TestCommandFixturesRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(fixture, &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Commands) != 3 || response.Commands[0].Kind != CommandRefreshInventory || response.Commands[1].Kind != CommandResync ||
-		response.Commands[2].Kind != CommandReboot || string(response.Commands[2].Args) != "{}" ||
+	if len(response.Commands) != 4 || response.Commands[0].Kind != CommandRefreshInventory || response.Commands[1].Kind != CommandResync ||
+		response.Commands[2].Kind != CommandReboot || string(response.Commands[2].Args) != "{}" || response.Commands[3].Kind != CommandUpgradePackages ||
 		response.Commands[0].ExpiresAt.Sub(response.Commands[0].CreatedAt) != 24*time.Hour {
 		t.Fatalf("commands = %+v", response.Commands)
 	}
@@ -73,7 +73,7 @@ func TestHTTPClientCommandEndpoints(t *testing.T) {
 	client := NewClient(server.URL+"/agent/v1", "scagt_secret", "1.2.3", server.Client())
 
 	fetched, err := client.FetchCommands(ctx)
-	if err != nil || len(fetched) != 3 || fetched[0].ID != "01jb9a2c3d4e5f6g7h8j9k0m1n" || string(fetched[1].Args) != `{
+	if err != nil || len(fetched) != 4 || fetched[0].ID != "01jb9a2c3d4e5f6g7h8j9k0m1n" || string(fetched[1].Args) != `{
         "datasets": [
           "packages"
         ]

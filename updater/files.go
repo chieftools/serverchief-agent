@@ -41,6 +41,25 @@ const maximumFileBytes = 16 << 10
 // ID never reaches a package manager.
 var commandIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
+// ValidCommandID reports whether id is a command ID the helpers accept.
+func ValidCommandID(id string) bool { return commandIDPattern.MatchString(id) }
+
+// nestedSuffix marks the agent update an upgrade_packages run carries out
+// itself (NestedCommandID). Its request, readiness marker and result use
+// the updater's files like any update, but no update_agent command has the
+// ID: the daemon writes the readiness marker for it and leaves its result
+// to the package upgrade helper.
+const nestedSuffix = "-agent"
+
+// NestedCommandID is the update ID of the agent update an upgrade_packages
+// command runs first.
+func NestedCommandID(commandID string) string { return commandID + nestedSuffix }
+
+// IsNestedCommandID reports whether id is a NestedCommandID.
+func IsNestedCommandID(id string) bool {
+	return len(id) > len(nestedSuffix) && id[len(id)-len(nestedSuffix):] == nestedSuffix
+}
+
 // Request is the daemon's hand-over to the helper.
 type Request struct {
 	CommandID       string    `json:"command_id"`
@@ -235,36 +254,78 @@ func (store Store) writeState(current state) error { return store.write(StateFil
 
 func (store Store) removeState() error { return store.remove(StateFile) }
 
-// read decodes name strictly. It refuses anything but a small regular
-// file that only its owner can access.
-func (store Store) read(name string, target any) (bool, error) {
+// ReadJSON decodes name like the updater's own files, for the package
+// upgrade helper's files in the same directory.
+func (store Store) ReadJSON(name string, target any) (bool, error) { return store.read(name, target) }
+
+// WriteJSON writes name like the updater's own files.
+func (store Store) WriteJSON(name string, value any) error { return store.write(name, value) }
+
+// Remove deletes name; a missing file is not an error.
+func (store Store) Remove(name string) error { return store.remove(name) }
+
+// ReadText returns the text file name, at most limit bytes, with the same
+// checks as the JSON files. found is false when it does not exist.
+func (store Store) ReadText(name string, limit int64) (string, bool, error) {
+	data, found, err := store.readBytes(name, limit)
+	return string(data), found, err
+}
+
+// WriteText writes the text file name like the JSON files.
+func (store Store) WriteText(name, text string) error {
+	if err := inventory.WriteFileAtomic(store.path(name), []byte(text), 0o600); err != nil {
+		return err
+	}
+	if os.Geteuid() == 0 && store.Owner > 0 {
+		return os.Lchown(store.path(name), store.Owner, -1)
+	}
+	return nil
+}
+
+// readBytes reads name. It refuses anything but a regular file of at most
+// limit bytes that only its owner can access.
+func (store Store) readBytes(name string, limit int64) ([]byte, bool, error) {
 	path := store.path(name)
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > maximumFileBytes {
-		return false, fmt.Errorf("%s is not a private regular file", path)
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > limit {
+		return nil, false, fmt.Errorf("%s is not a private regular file", path)
 	}
 	if store.Owner >= 0 {
 		if uid, ok := fileOwner(info); ok && uid != store.Owner {
-			return false, fmt.Errorf("%s is owned by uid %d", path, uid)
+			return nil, false, fmt.Errorf("%s is owned by uid %d", path, uid)
 		}
 	}
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	defer file.Close()
 	// The file seen by Lstat must be the file opened
 	if opened, err := file.Stat(); err != nil || !os.SameFile(info, opened) {
-		return false, fmt.Errorf("%s changed while it was read", path)
+		return nil, false, fmt.Errorf("%s changed while it was read", path)
 	}
-	data, err := io.ReadAll(io.LimitReader(file, maximumFileBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(data)) > limit {
+		return nil, false, fmt.Errorf("%s is larger than %d bytes", path, limit)
+	}
+	return data, true, nil
+}
+
+// read decodes name strictly. It refuses anything but a small regular
+// file that only its owner can access.
+func (store Store) read(name string, target any) (bool, error) {
+	path := store.path(name)
+	data, found, err := store.readBytes(name, maximumFileBytes)
+	if err != nil || !found {
 		return false, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))

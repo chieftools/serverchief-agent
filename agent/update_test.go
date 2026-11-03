@@ -421,7 +421,7 @@ func TestHeartbeatReportsUpdatesUnavailableWithoutAController(t *testing.T) {
 	tick(t, daemon)
 	heartbeat := setup.server.heartbeatLog()[0]
 	encoded, _ := json.Marshal(heartbeat.Capabilities)
-	if string(encoded) != `{"agent_update":{"available":false,"reason":"agent updates are not supported by this build"},"reboot":{"available":false,"reason":"reboots are not supported by this build"},"disabled":[]}` {
+	if string(encoded) != `{"agent_update":{"available":false,"reason":"agent updates are not supported by this build"},"reboot":{"available":false,"reason":"reboots are not supported by this build"},"upgrade_packages":{"available":false,"reason":"installing package updates is not supported by this build"},"disabled":[]}` {
 		t.Fatalf("capabilities = %s", encoded)
 	}
 }

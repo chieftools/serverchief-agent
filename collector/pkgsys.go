@@ -250,3 +250,61 @@ func (host *Host) runRefresh(ctx context.Context, argv []string) (CommandResult,
 	}
 	return CommandResult{Stdout: result.Stdout, Stderr: result.Stderr, ExitCode: result.ExitCode}, nil
 }
+
+// Manager is the host's package manager (ManagerApt, ManagerDnf or
+// ManagerYum), "" without a supported one.
+func (system *PackageSystem) Manager() string { return system.host.updateManager() }
+
+// Tool returns the absolute path of a program in the usual binary
+// directories, "" when it is not installed.
+func (system *PackageSystem) Tool(name string) string { return system.host.findCommand(name) }
+
+// PendingUpdates collects the updates dataset now: the pending updates
+// from the existing metadata cache and whether a reboot is required. It
+// returns a BusyError while a package manager holds its lock.
+func (system *PackageSystem) PendingUpdates(ctx context.Context) (*UpdatesInfo, error) {
+	payload, err := NewUpdates(system.host).Collect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	info, ok := payload.(*UpdatesInfo)
+	if !ok {
+		return nil, errors.New("unexpected updates payload")
+	}
+	return info, nil
+}
+
+// HasSecurityMetadata reports whether the enabled yum/dnf repositories
+// publish advisories (updateinfo), which `upgrade --security` needs. With
+// pending updates but no advisory of any kind, the repositories carry
+// none (CentOS 7's do not); without pending updates it cannot be told
+// and counts as available. A failing query counts as unavailable. apt
+// always has security pockets.
+func (system *PackageSystem) HasSecurityMetadata(ctx context.Context, pending int) bool {
+	host := system.host
+	manager := host.updateManager()
+	if manager == ManagerApt {
+		return true
+	}
+	if manager == "" {
+		return false
+	}
+	result, err := host.rpmQuery(ctx, manager, "updateinfo", "list")
+	if err != nil || result.ExitCode != 0 {
+		return false
+	}
+	if pending == 0 {
+		return true
+	}
+	for _, line := range lines(result.Stdout) {
+		// "ADVISORY TYPE NEVRA"; yum ends with "updateinfo list done".
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] == "updateinfo" {
+			continue
+		}
+		if _, _, ok := splitNEVRA(fields[len(fields)-1]); ok {
+			return true
+		}
+	}
+	return false
+}

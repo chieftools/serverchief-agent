@@ -170,6 +170,7 @@ the systemd unit does not restart.`,
 				ChangePoll:     changePoll,
 				Updates:        updates,
 				Reboots:        newReboots(paths.RebootRequest, privilege, host),
+				Upgrades:       newUpgrades(paths.Upgrades, privilege, host),
 				OptOut: func() optout.State {
 					return optout.Load(paths.DisabledCapabilities, 0)
 				},

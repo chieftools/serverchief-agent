@@ -96,5 +96,8 @@ func helperActions() helper.Actions {
 			},
 		},
 		helper.ActionReboot: rebootAction(optout.Path, 0),
+		helper.ActionStartPackageUpgrade: startUpgradeAction(optout.Path, 0, func(ctx context.Context) error {
+			return upgradeLauncher(initsys.DetectSystem()).Launch(ctx)
+		}),
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.chief.tools/serverchief-agent/optout"
+	"go.chief.tools/serverchief-agent/upgrader"
 )
 
 const (
@@ -59,6 +60,9 @@ type Paths struct {
 	Metrics string
 	// RebootRequest is the reboot in progress, kept across the reboot.
 	RebootRequest string
+	// Upgrades holds the package upgrade's request, state, result and
+	// output files (upgrader.Files), next to the agent update's.
+	Upgrades string
 	// DisabledCapabilities is the operator's opt-out (optout.Path).
 	DisabledCapabilities string
 	// Log is the file log used on hosts without journald.
@@ -84,6 +88,7 @@ func DefaultPaths() Paths {
 		Updates:         "/var/lib/serverchief",
 		Metrics:         "/var/lib/serverchief/metrics",
 		RebootRequest:   "/var/lib/serverchief/reboot-request.json",
+		Upgrades:        "/var/lib/serverchief",
 		Log:             "/var/log/serverchief/agent.log",
 
 		DisabledCapabilities: optout.Path,
@@ -101,6 +106,7 @@ func (paths Paths) WithStateDirectory(directory string) Paths {
 	paths.Updates = directory
 	paths.Metrics = filepath.Join(directory, "metrics")
 	paths.RebootRequest = filepath.Join(directory, "reboot-request.json")
+	paths.Upgrades = directory
 	return paths
 }
 
@@ -254,6 +260,9 @@ type Capabilities struct {
 	// Reboot tells whether the backend may send reboot (1.2.0); nil when
 	// the operator turned it off.
 	Reboot *ActionCapability `json:"reboot,omitempty"`
+	// UpgradePackages tells whether the backend may send upgrade_packages
+	// (1.2.0); nil when the operator turned it off.
+	UpgradePackages *ActionCapability `json:"upgrade_packages,omitempty"`
 	// Disabled lists the capabilities the operator turned off with
 	// `serverchief disable` (1.2.0), sorted. The daemon always sends it,
 	// empty when nothing is turned off.
@@ -319,6 +328,10 @@ const (
 	// CommandReboot reboots the server ({}) unless the operator turned it
 	// off (1.2.0).
 	CommandReboot = "reboot"
+	// CommandUpgradePackages installs package updates ({"scope",
+	// "restart_services", "agent_version"}) through the detached package
+	// upgrade helper unless the operator turned it off (1.2.0).
+	CommandUpgradePackages = "upgrade_packages"
 )
 
 // Command result statuses.
@@ -380,6 +393,10 @@ const (
 	RebootCodePackageManagerBusy = "package_manager_busy"
 	RebootCodeFailed             = "reboot_failed"
 )
+
+// UpgradePackagesData is the data of an upgrade_packages result
+// (fixtures/upgrade-packages-result-request.json).
+type UpgradePackagesData = upgrader.Data
 
 // AgentUpdateData is the data of an update_agent result
 // (fixtures/update-agent-result-request.json).

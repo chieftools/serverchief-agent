@@ -32,6 +32,33 @@ type Launcher struct {
 	Run    Runner
 	// LogPath receives the helper's output under SysV.
 	LogPath string
+	// Unit, Subcommand and Description name the helper; empty fields are
+	// the agent update helper's (HelperUnit, internal-update). The package
+	// upgrade helper launches the same way under its own names.
+	Unit        string
+	Subcommand  string
+	Description string
+}
+
+func (launcher Launcher) unit() string {
+	if launcher.Unit != "" {
+		return launcher.Unit
+	}
+	return HelperUnit
+}
+
+func (launcher Launcher) subcommand() string {
+	if launcher.Subcommand != "" {
+		return launcher.Subcommand
+	}
+	return "internal-update"
+}
+
+func (launcher Launcher) description() string {
+	if launcher.Description != "" {
+		return launcher.Description
+	}
+	return "Server Chief agent update"
 }
 
 // Launch starts the helper. Under systemd it is a transient service
@@ -51,14 +78,14 @@ func (launcher Launcher) Launch(ctx context.Context) error {
 	if logPath == "" {
 		logPath = DefaultLogPath
 	}
-	intermediate, err := SpawnDetached(binary, []string{"internal-update", DetachFlag}, logPath)
+	intermediate, err := SpawnDetached(binary, []string{launcher.subcommand(), DetachFlag}, logPath)
 	if err != nil {
-		return fmt.Errorf("start the update helper: %w", err)
+		return fmt.Errorf("start the %s helper: %w", launcher.subcommand(), err)
 	}
 	// The intermediate process starts the helper and exits at once;
 	// reaping it leaves the helper orphaned, owned by init.
 	if err := intermediate.Wait(); err != nil {
-		return fmt.Errorf("start the update helper: %w", err)
+		return fmt.Errorf("start the %s helper: %w", launcher.subcommand(), err)
 	}
 	return nil
 }
@@ -68,11 +95,15 @@ func (launcher Launcher) Launch(ctx context.Context) error {
 // systemd 236; older systemd-run waits until the service started, which
 // is immediate, and a failed unit is reset before the next launch.
 func SystemdRunArgv(systemdRun, binary string, systemdVersion int) []string {
-	argv := []string{systemdRun, "--unit=" + HelperUnit}
+	return Launcher{}.systemdRunArgv(systemdRun, binary, systemdVersion)
+}
+
+func (launcher Launcher) systemdRunArgv(systemdRun, binary string, systemdVersion int) []string {
+	argv := []string{systemdRun, "--unit=" + launcher.unit()}
 	if systemdVersion == 0 || systemdVersion >= 236 {
 		argv = append(argv, "--collect", "--no-block")
 	}
-	return append(argv, "--description=Server Chief agent update", binary, "internal-update")
+	return append(argv, "--description="+launcher.description(), binary, launcher.subcommand())
 }
 
 func (launcher Launcher) systemdRun(ctx context.Context, binary string) error {
@@ -92,9 +123,9 @@ func (launcher Launcher) systemdRun(ctx context.Context, binary string) error {
 			version = parseSystemdVersion(string(output.Stdout))
 		}
 		// A helper unit that failed earlier would block the unit name.
-		_, _ = run(ctx, nil, []string{systemctl, "reset-failed", HelperUnit + ".service"})
+		_, _ = run(ctx, nil, []string{systemctl, "reset-failed", launcher.unit() + ".service"})
 	}
-	output, err := run(ctx, nil, SystemdRunArgv(systemdRun, binary, version))
+	output, err := run(ctx, nil, launcher.systemdRunArgv(systemdRun, binary, version))
 	if err != nil {
 		return fmt.Errorf("systemd-run: %w", err)
 	}

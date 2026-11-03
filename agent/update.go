@@ -89,6 +89,7 @@ func (daemon *daemon) capabilities(ctx context.Context) *Capabilities {
 	optOut := daemon.optOut()
 	result.Disabled = optOut.Disabled
 	result.Reboot = daemon.rebootCapability(ctx, optOut)
+	result.UpgradePackages = daemon.upgradeCapability(ctx, optOut)
 	return result
 }
 
@@ -217,6 +218,11 @@ func (daemon *daemon) pollUpdate(ctx context.Context, now time.Time) {
 		log.Printf("[update] %v", resultErr)
 	}
 	lingering := false
+	if result != nil && updater.IsNestedCommandID(result.CommandID) {
+		// The agent update a package upgrade runs first: its helper reads
+		// and removes the result.
+		result = nil
+	}
 	if result != nil {
 		record := daemon.commands.get(result.CommandID)
 		switch {

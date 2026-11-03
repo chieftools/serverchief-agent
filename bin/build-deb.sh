@@ -42,6 +42,7 @@ trap 'rm -rf "${BUILD_DIR}"' EXIT
 mkdir -p "${DEB_DIR}/DEBIAN" \
     "${DEB_DIR}/usr/bin" \
     "${DEB_DIR}/etc/init.d" \
+    "${DEB_DIR}/etc/needrestart/conf.d" \
     "${DEB_DIR}/lib/systemd/system" \
     "${DEB_DIR}/usr/share/serverchief" \
     "${DEB_DIR}/usr/share/doc/serverchief"
@@ -54,6 +55,8 @@ fi
 
 install -m 0755 "serverchief-linux-${GOARCH}" "${DEB_DIR}/usr/bin/serverchief"
 install -m 0755 packaging/serverchief.init "${DEB_DIR}/etc/init.d/serverchief"
+# needrestart never restarts the agent (package upgrades restart services).
+install -m 0644 packaging/needrestart.conf "${DEB_DIR}/etc/needrestart/conf.d/serverchief.conf"
 # /lib/systemd/system rather than /usr/lib: Ubuntu 14.04-era systemd and
 # usrmerge-less Debian releases only read the former.
 install -m 0644 packaging/serverchief.service "${DEB_DIR}/lib/systemd/system/serverchief.service"
@@ -82,6 +85,7 @@ EOF2
 
 cat > "${DEB_DIR}/DEBIAN/conffiles" << EOF2
 /etc/init.d/serverchief
+/etc/needrestart/conf.d/serverchief.conf
 EOF2
 
 install -m 0755 packaging/postinstall.sh "${DEB_DIR}/DEBIAN/postinst"

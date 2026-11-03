@@ -51,6 +51,10 @@ const (
 	// ActionReboot schedules a reboot in one minute (shutdown -r +1). It
 	// refuses when the operator turned reboot off, which it reads itself.
 	ActionReboot = "reboot"
+	// ActionStartPackageUpgrade starts the package upgrade helper for the
+	// request the daemon wrote to its state directory. It refuses when the
+	// operator turned upgrade_packages off, which it reads itself.
+	ActionStartPackageUpgrade = "start-package-upgrade"
 )
 
 const (

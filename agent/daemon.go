@@ -17,6 +17,7 @@ import (
 	"go.chief.tools/serverchief-agent/inventory"
 	"go.chief.tools/serverchief-agent/optout"
 	"go.chief.tools/serverchief-agent/updater"
+	"go.chief.tools/serverchief-agent/upgrader"
 )
 
 const (
@@ -78,6 +79,9 @@ type RunOptions struct {
 	// Reboots carries out reboot and reports the capability. Nil reports
 	// reboots unsupported.
 	Reboots *Reboots
+	// Upgrades hands upgrade_packages to the detached package upgrade
+	// helper and reports the capability. Nil reports it unsupported.
+	Upgrades *upgrader.Controller
 	// OptOut reads the operator's opt-out before every heartbeat and
 	// command (optout.Load). Nil means nothing is turned off.
 	OptOut func() optout.State
@@ -136,6 +140,9 @@ type daemon struct {
 	// reboot is a reboot waiting for the package manager or for its
 	// verification.
 	reboot rebootWork
+	// upgrade is a package upgrade waiting for the package manager or
+	// handed to its helper.
+	upgrade upgradeWork
 	// optOutError is the last opt-out error logged.
 	optOutError string
 }
@@ -300,6 +307,8 @@ func (daemon *daemon) tick(ctx context.Context) error {
 		}
 	}
 	daemon.pollUpdate(ctx, options.Now())
+	// Upgrades first: a reboot waiting for one starts in the same tick.
+	daemon.tickUpgrade(ctx, options.Now())
 	daemon.tickReboot(options.Now())
 	if !daemon.unsupported {
 		if err := daemon.sendResults(ctx); err != nil {
@@ -330,6 +339,9 @@ func (daemon *daemon) wakeAt() time.Time {
 		wakeAt = daemon.update.pollAt
 	}
 	if at := daemon.rebootWakeAt(); !at.IsZero() && at.Before(wakeAt) {
+		wakeAt = at
+	}
+	if at := daemon.upgradeWakeAt(); !at.IsZero() && at.Before(wakeAt) {
 		wakeAt = at
 	}
 	if !daemon.unsupported {

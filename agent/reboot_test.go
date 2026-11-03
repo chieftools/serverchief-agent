@@ -192,7 +192,7 @@ func TestHeartbeatReportsRebootAndTheOptOut(t *testing.T) {
 	tick(t, daemon)
 	heartbeats := setup.server.heartbeatLog()
 	encoded, _ := json.Marshal(heartbeats[len(heartbeats)-1].Capabilities)
-	if strings.Contains(string(encoded), `"reboot":`) || !strings.Contains(string(encoded), `"disabled":["reboot","upgrade_packages"]`) {
+	if strings.Contains(string(encoded), `"reboot":`) || strings.Contains(string(encoded), `"upgrade_packages":`) || !strings.Contains(string(encoded), `"disabled":["reboot","upgrade_packages"]`) {
 		t.Fatalf("capabilities = %s", encoded)
 	}
 
@@ -202,7 +202,7 @@ func TestHeartbeatReportsRebootAndTheOptOut(t *testing.T) {
 	tick(t, daemon)
 	heartbeats = setup.server.heartbeatLog()
 	encoded, _ = json.Marshal(heartbeats[len(heartbeats)-1].Capabilities)
-	if !strings.Contains(string(encoded), `"reboot":{"available":false,"reason":"running in a docker container, which has no init system to reboot"},"disabled":[]`) {
+	if !strings.Contains(string(encoded), `"reboot":{"available":false,"reason":"running in a docker container, which has no init system to reboot"},`) || !strings.Contains(string(encoded), `"disabled":[]`) {
 		t.Fatalf("capabilities = %s", encoded)
 	}
 }

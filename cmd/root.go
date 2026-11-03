@@ -44,6 +44,7 @@ func NewRootCommand(version string) *cobra.Command {
 	root.AddCommand(newEnableCommand(optOut))
 	root.AddCommand(newCapabilitiesCommand(optOut))
 	root.AddCommand(newInternalUpdateCommand())
+	root.AddCommand(newInternalUpgradeCommand())
 	root.AddCommand(newInternalHelperCommand())
 	root.AddCommand(newInternalUnprivilegeCommand())
 	return root

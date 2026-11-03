@@ -1,0 +1,23 @@
+{
+  "data": {
+    "agent_update": {
+      "code": "updated",
+      "installed_version": "0.4.1",
+      "previous_version": "0.4.0"
+    },
+    "code": "upgraded",
+    "held_back": 0,
+    "reboot_required": true,
+    "scope": "security",
+    "services_restarted": [
+      "nginx.service",
+      "php8.3-fpm.service"
+    ],
+    "upgraded": 3
+  },
+  "detail": null,
+  "finished_at": "2026-10-22T14:21:07Z",
+  "output": "$ apt-get update -qq\n$ apt-get install -y --only-upgrade -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold libssl3 linux-image-generic openssl\nReading package lists...\nThe following packages will be upgraded:\n  libssl3 linux-image-generic openssl\n3 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.\nRestarting services...\n systemctl restart nginx.service php8.3-fpm.service\n",
+  "output_truncated": false,
+  "status": "succeeded"
+}

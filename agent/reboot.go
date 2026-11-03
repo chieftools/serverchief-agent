@@ -171,7 +171,7 @@ func (daemon *daemon) startReboot(record commandRecord) {
 		return
 	}
 	now := daemon.options.Now()
-	if lock, held := daemon.packageManagerBusy(); held {
+	if lock, held := daemon.rebootBlocked(); held {
 		log.Printf("[commands] %s %s: waiting for the package manager (%s) before rebooting", record.Kind, record.ID, lock)
 		daemon.reboot.waiting = &record
 		daemon.reboot.waitUntil = now.Add(rebootLockPatience)
@@ -193,6 +193,16 @@ func (daemon *daemon) rebootInProgress(except string) string {
 		}
 	}
 	return ""
+}
+
+// rebootBlocked reports a held package-manager lock or a package upgrade
+// in progress, which a reboot never interrupts: between its steps the
+// locks are free.
+func (daemon *daemon) rebootBlocked() (string, bool) {
+	if other := daemon.upgradeInProgress(""); other != "" {
+		return "the package upgrade " + other, true
+	}
+	return daemon.packageManagerBusy()
 }
 
 func (daemon *daemon) packageManagerBusy() (string, bool) {
@@ -255,7 +265,7 @@ func (daemon *daemon) tickReboot(now time.Time) {
 	work := &daemon.reboot
 	if work.waiting != nil && !now.Before(work.checkAt) {
 		record := *work.waiting
-		if lock, held := daemon.packageManagerBusy(); held {
+		if lock, held := daemon.rebootBlocked(); held {
 			if !now.Before(work.waitUntil) {
 				work.waiting = nil
 				daemon.failReboot(record.ID, RebootCodePackageManagerBusy,

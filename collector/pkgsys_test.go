@@ -481,6 +481,10 @@ var allowedUpdateCommands = []string{
 // updateVerbs are the only mutating words an update argv may contain.
 var updateVerbs = map[string]bool{"install": true, "downgrade": true, "-y": true}
 
+// upgradeVerbs are the only mutating words a package upgrade argv may
+// contain (upgrader.AptInstall, upgrader.RPMUpgrade).
+var upgradeVerbs = map[string]bool{"install": true, "upgrade": true, "-y": true}
+
 // matchesUpdateCommand reports whether a normalized command line is an
 // allow-listed update argv. Placeholders match only their exact values.
 func matchesUpdateCommand(line string) bool {
@@ -618,13 +622,16 @@ func TestUpdateCommandAllowList(t *testing.T) {
 // metadata refresh and dist-upgrade only appears with -s.) initsys runs
 // no package manager (its update-rc.d "remove" is a service command) and
 // is not scanned. The agent update's argv builder, updater/commands.go,
-// is the one file allowed to spell out install, downgrade and -y.
+// is the one file allowed to spell out install, downgrade and -y, and the
+// package upgrade's, upgrader/commands.go, the one allowed install,
+// upgrade and -y.
 func TestNoMutatingPackageVerbsInSource(t *testing.T) {
 	const updateCommands = "../updater/commands.go"
-	allowedIn := map[string]map[string]bool{updateCommands: updateVerbs}
+	const upgradeCommands = "../upgrader/commands.go"
+	allowedIn := map[string]map[string]bool{updateCommands: updateVerbs, upgradeCommands: upgradeVerbs}
 	used := map[string]bool{}
 	var files []string
-	for _, directory := range []string{".", "../agent", "../cmd", "../pkglock", "../updater"} {
+	for _, directory := range []string{".", "../agent", "../cmd", "../pkglock", "../updater", "../upgrader"} {
 		matches, err := filepath.Glob(filepath.Join(directory, "*.go"))
 		if err != nil {
 			t.Fatal(err)
@@ -655,7 +662,7 @@ func TestNoMutatingPackageVerbsInSource(t *testing.T) {
 			}
 			if forbiddenPackageVerbs[value] {
 				if allowedIn[name][value] {
-					used[value] = true
+					used[name+" "+value] = true
 					return true
 				}
 				t.Errorf("%s: string literal %q is a mutating package-manager verb", fileSet.Position(literal.Pos()), value)
@@ -663,9 +670,11 @@ func TestNoMutatingPackageVerbsInSource(t *testing.T) {
 			return true
 		})
 	}
-	for verb := range updateVerbs {
-		if !used[verb] {
-			t.Errorf("%s no longer uses %q; drop it from the exemption", updateCommands, verb)
+	for file, verbs := range allowedIn {
+		for verb := range verbs {
+			if !used[file+" "+verb] {
+				t.Errorf("%s no longer uses %q; drop it from the exemption", file, verb)
+			}
 		}
 	}
 }

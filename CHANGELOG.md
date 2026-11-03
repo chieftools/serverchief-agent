@@ -12,8 +12,10 @@ release.
 ### Added
 
 - Server Chief can reboot the server from the dashboard with the new `reboot` command. The agent waits for a running package manager to finish, schedules the reboot a minute ahead with `shutdown -r +1` so logged-in users are warned, and reports the result with the new boot time after the server is back. Application containers such as Docker cannot be rebooted and report why.
-- `serverchief disable`, `serverchief enable` and `serverchief capabilities` turn remote actions (`reboot`, and `upgrade_packages` for installing package updates later) off and on again on the server itself. The setting is stored in `/etc/serverchief/disabled-capabilities.json`, which the dashboard cannot change, and the dashboard shows a turned-off action as such.
+- Server Chief can install package updates from the dashboard with the new `upgrade_packages` command: the security updates or all pending updates, never the `serverchief` package itself, keeping local configuration files. When the dashboard asks for it, the agent first updates itself the usual way, with its readiness check and rollback. Services that use updated libraries can be restarted afterwards (needrestart on Debian and Ubuntu, `needs-restarting -s` on RHEL and derivatives), so most updates take effect without a reboot, and the result says whether a reboot is still required. The upgrade runs in its own `serverchief-upgrade` unit, survives the agent restarting and reports what it ran.
+- `serverchief disable`, `serverchief enable` and `serverchief capabilities` turn remote actions (`reboot` and `upgrade_packages`) off and on again on the server itself. The setting is stored in `/etc/serverchief/disabled-capabilities.json`, which the dashboard cannot change, and the dashboard shows a turned-off action as such.
 - Command results include the output of what the command ran, so the dashboard can show it.
+- The Debian package installs `/etc/needrestart/conf.d/serverchief.conf`, so needrestart never restarts the agent.
 - The agent speaks revision 1.2.0 of the agent protocol.
 
 ## [0.3.1]
