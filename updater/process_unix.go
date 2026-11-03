@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 )
 
@@ -69,6 +70,11 @@ func LockHeld(path string) bool {
 // /dev/null and stdout/stderr appended to logPath, and does not wait for
 // it. The caller reaps it (or exits) to complete a double fork.
 func SpawnDetached(binary string, args []string, logPath string) (*exec.Cmd, error) {
+	// The package creates the log directory; an agent that runs without
+	// it (a tarball install, a development container) creates it here.
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o750); err != nil {
+		return nil, fmt.Errorf("create the log directory of %s: %w", logPath, err)
+	}
 	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", logPath, err)

@@ -28,7 +28,9 @@ const (
 var aptPackagePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]*(:[a-z0-9-]+)?$`)
 
 // aptOptions keep local configuration files and never prompt.
-var aptOptions = []string{"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"}
+// aptOptions keep local configuration files, and leave out dpkg's progress
+// line ("Reading database ... 5%"), which only fills the output.
+var aptOptions = []string{"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold", "-o", "Dpkg::Use-Pty=0"}
 
 // AptEnvironment is the environment of apt-get install. With
 // restartServices needrestart restarts the services that use updated

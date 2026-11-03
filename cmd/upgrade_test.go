@@ -85,7 +85,15 @@ func TestUpgradeLauncherRunsInternalUpgradeInItsOwnUnit(t *testing.T) {
 	if err := launcher.Launch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	want := "/usr/bin/systemd-run --unit=serverchief-upgrade --collect --no-block --description=Server Chief package upgrade /usr/bin/serverchief internal-upgrade"
+	// The upgrade helper runs the agent's own executable, wherever it is installed.
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	want := "/usr/bin/systemd-run --unit=serverchief-upgrade --collect --no-block --description=Server Chief package upgrade " + executable + " internal-upgrade"
 	if !slices.Contains(ran, want) || !slices.Contains(ran, "/usr/bin/systemctl reset-failed serverchief-upgrade.service") {
 		t.Fatalf("ran = %q", ran)
 	}

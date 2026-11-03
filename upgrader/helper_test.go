@@ -158,7 +158,7 @@ func TestAptUpgradeInstallsTheScopeWithoutServerChiefAndReportsNeedrestart(t *te
 	want := []string{
 		"/usr/bin/dpkg --audit",
 		"/usr/bin/apt-get update -qq",
-		"/usr/bin/apt-get install -y --only-upgrade -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold libssl3:amd64 openssl:amd64",
+		"/usr/bin/apt-get install -y --only-upgrade -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dpkg::Use-Pty=0 libssl3:amd64 openssl:amd64",
 	}
 	if commands := setup.runner.commands(); !reflect.DeepEqual(commands, want) {
 		t.Fatalf("commands = %q", commands)
@@ -192,7 +192,7 @@ func TestAptUpgradeWithoutRestartingServicesSuspendsNeedrestart(t *testing.T) {
 	result, _ := setup.run(t)
 
 	commands := setup.runner.commands()
-	if commands[len(commands)-1] != "/usr/bin/apt-get install -y --only-upgrade -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold curl:arm64 tzdata" {
+	if commands[len(commands)-1] != "/usr/bin/apt-get install -y --only-upgrade -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dpkg::Use-Pty=0 curl:arm64 tzdata" {
 		t.Fatalf("commands = %q", commands)
 	}
 	if env := setup.runner.env[len(commands)-1]; !slices.Contains(env, "NEEDRESTART_SUSPEND=1") || slices.Contains(env, "NEEDRESTART_MODE=a") {

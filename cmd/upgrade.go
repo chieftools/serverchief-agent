@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -33,7 +34,23 @@ const (
 // agent update helper: a transient systemd unit, or a double-forked setsid
 // child under SysV.
 func upgradeLauncher(init initsys.Kind) updater.Launcher {
-	return updater.Launcher{Init: init, Unit: upgradeUnit, Subcommand: upgradeSubcommand, Description: upgradeDescription, LogPath: upgradeLogPath}
+	return updater.Launcher{Init: init, Binary: agentBinary(), Unit: upgradeUnit, Subcommand: upgradeSubcommand, Description: upgradeDescription, LogPath: upgradeLogPath}
+}
+
+// agentBinary is the running agent's own executable, which the package
+// upgrade helper runs. Unlike an agent update, which runs the newly
+// installed package, an upgrade never replaces the binary it runs from, and
+// an agent installed outside /usr/bin (a tarball, a development container)
+// has no packaged binary. Falls back to the packaged path.
+func agentBinary() string {
+	path, err := os.Executable()
+	if err != nil {
+		return updater.Binary
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }
 
 // upgradeCapability tells whether package updates can be installed,
@@ -115,7 +132,7 @@ func newInternalUpgradeCommand() *cobra.Command {
 			}
 			if detach {
 				// Second fork: start the helper in its own session and exit.
-				_, err := updater.SpawnDetached(updater.Binary, []string{upgradeSubcommand}, upgradeLogPath)
+				_, err := updater.SpawnDetached(agentBinary(), []string{upgradeSubcommand}, upgradeLogPath)
 				return err
 			}
 			if _, err := logging.Setup(""); err != nil {
