@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -65,7 +64,9 @@ type rebootRequest struct {
 // rebootWork is a reboot waiting for the package manager, and when to
 // check next whether a handed-off reboot happened.
 type rebootWork struct {
-	waiting   *commandRecord
+	waiting *commandRecord
+	// deadline is the waiting reboot's not_after, zero for none.
+	deadline  time.Time
 	waitUntil time.Time
 	checkAt   time.Time
 	verifyAt  time.Time
@@ -138,16 +139,14 @@ const rebootDisabledDetail = "rebooting is turned off on this server; `serverchi
 // startReboot executes reboot: it checks the opt-out and the capability,
 // then reboots once no package manager runs, waiting up to 15 minutes.
 func (daemon *daemon) startReboot(record commandRecord) {
-	if trimmed := bytes.TrimSpace(record.Args); len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) {
-		// Arguments a later revision adds (such as a deadline) must not
-		// be ignored silently, so unknown ones are rejected.
-		var args struct{}
-		decoder := json.NewDecoder(bytes.NewReader(trimmed))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&args); err != nil {
-			daemon.finishCommand(record.ID, CommandFailed, fmt.Sprintf("invalid args: %v", err))
-			return
-		}
+	deadline, err := parseRebootArgs(record.Args)
+	if err != nil {
+		daemon.finishCommand(record.ID, CommandFailed, fmt.Sprintf("invalid args: %v", err))
+		return
+	}
+	if passed(deadline, daemon.options.Now()) {
+		daemon.failReboot(record.ID, RebootCodeTooLate, tooLateDetail(deadline), "", false)
+		return
 	}
 	if daemon.optOut().IsDisabled(optout.Reboot) {
 		daemon.failReboot(record.ID, RebootCodeDisabled, rebootDisabledDetail, "", false)
@@ -174,7 +173,8 @@ func (daemon *daemon) startReboot(record commandRecord) {
 	if lock, held := daemon.rebootBlocked(); held {
 		log.Printf("[commands] %s %s: waiting for the package manager (%s) before rebooting", record.Kind, record.ID, lock)
 		daemon.reboot.waiting = &record
-		daemon.reboot.waitUntil = now.Add(rebootLockPatience)
+		daemon.reboot.deadline = deadline
+		daemon.reboot.waitUntil = waitUntil(now.Add(rebootLockPatience), deadline)
 		daemon.reboot.checkAt = now.Add(rebootLockRetry)
 		return
 	}
@@ -265,7 +265,10 @@ func (daemon *daemon) tickReboot(now time.Time) {
 	work := &daemon.reboot
 	if work.waiting != nil && !now.Before(work.checkAt) {
 		record := *work.waiting
-		if lock, held := daemon.rebootBlocked(); held {
+		if passed(work.deadline, now) {
+			work.waiting = nil
+			daemon.failReboot(record.ID, RebootCodeTooLate, tooLateDetail(work.deadline), "", false)
+		} else if lock, held := daemon.rebootBlocked(); held {
 			if !now.Before(work.waitUntil) {
 				work.waiting = nil
 				daemon.failReboot(record.ID, RebootCodePackageManagerBusy,

@@ -30,6 +30,7 @@
     {
       "args": {
         "agent_version": "0.4.1",
+        "not_after": "2026-10-22T14:43:00Z",
         "restart_services": true,
         "scope": "security"
       },

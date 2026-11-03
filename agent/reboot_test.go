@@ -296,7 +296,8 @@ func TestRebootRefusalsAreReportedWithTheirCodes(t *testing.T) {
 	setup.reboots.capable = ActionCapability{Reason: new("the root helper does not answer")}
 	setup.command(t, daemon, "r2", `{}`)
 	setup.reboots.capable = ActionCapability{Available: true}
-	setup.command(t, daemon, "r3", `{"not_after":"2026-10-22T15:00:00Z"}`)
+	setup.command(t, daemon, "r3", `{"delay":60}`)
+	setup.command(t, daemon, "r4", `{"not_after":"tonight"}`)
 
 	if setup.reboots.count() != 0 {
 		t.Fatalf("rebooted %d times", setup.reboots.count())
@@ -313,8 +314,54 @@ func TestRebootRefusalsAreReportedWithTheirCodes(t *testing.T) {
 			t.Fatalf("%s data = %+v", id, data)
 		}
 	}
-	if results := setup.server.resultsOf("r3"); len(results) != 1 || results[0].Status != CommandFailed || !strings.HasPrefix(*results[0].Detail, "invalid args:") {
-		t.Fatalf("r3 results = %+v", results)
+	for _, id := range []string{"r3", "r4"} {
+		if results := setup.server.resultsOf(id); len(results) != 1 || results[0].Status != CommandFailed || !strings.HasPrefix(*results[0].Detail, "invalid args:") || results[0].Data != nil {
+			t.Fatalf("%s results = %+v", id, results)
+		}
+	}
+}
+
+func TestRebootIsNotStartedAfterItsDeadline(t *testing.T) {
+	setup := newRebootSetup(t)
+	daemon := setup.start(t)
+	tick(t, daemon)
+
+	past := setup.clock.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	setup.command(t, daemon, "r1", `{"not_after":"`+past+`"}`)
+	results := setup.server.resultsOf("r1")
+	if len(results) != 1 || results[0].Status != CommandFailed || rebootResultData(t, results[0]).Code != RebootCodeTooLate ||
+		!strings.Contains(*results[0].Detail, "not_after "+past) || setup.reboots.count() != 0 {
+		t.Fatalf("results = %+v, reboots %d", results, setup.reboots.count())
+	}
+
+	future := setup.clock.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	setup.command(t, daemon, "r2", `{"not_after":"`+future+`"}`)
+	if setup.reboots.count() != 1 {
+		t.Fatalf("reboots = %d before the deadline", setup.reboots.count())
+	}
+}
+
+func TestRebootWaitingForThePackageManagerStopsAtItsDeadline(t *testing.T) {
+	setup := newRebootSetup(t)
+	cache := time.Now()
+	setup.packages = &fakePackages{token: "dpkg@1", cache: &cache, lock: "/var/lib/dpkg/lock-frontend (fcntl, pid 42)"}
+	daemon := setup.start(t)
+	tick(t, daemon)
+
+	deadline := setup.clock.Now().Add(2 * time.Minute).UTC().Format(time.RFC3339)
+	setup.command(t, daemon, "r1", `{"not_after":"`+deadline+`"}`)
+	setup.clock.advance(rebootLockRetry)
+	tick(t, daemon)
+	if len(setup.server.resultsOf("r1")) != 0 {
+		t.Fatal("gave up before the deadline")
+	}
+	for range 4 {
+		setup.clock.advance(rebootLockRetry)
+		tick(t, daemon)
+	}
+	results := setup.server.resultsOf("r1")
+	if len(results) != 1 || rebootResultData(t, results[0]).Code != RebootCodeTooLate || setup.reboots.count() != 0 || daemon.reboot.waiting != nil {
+		t.Fatalf("results = %+v, reboots %d", results, setup.reboots.count())
 	}
 }
 

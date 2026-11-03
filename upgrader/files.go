@@ -52,6 +52,7 @@ const (
 	CodePackageManagerBusy  = "package_manager_busy"
 	CodeDisabled            = "disabled"
 	CodeUnsupported         = "unsupported"
+	CodeTooLate             = "too_late"
 )
 
 // Command result statuses (the protocol's).

@@ -28,7 +28,9 @@ const (
 // for the package manager, and polling for the helper's result while one
 // is handed off.
 type upgradeWork struct {
-	waiting   *commandRecord
+	waiting *commandRecord
+	// deadline is the waiting upgrade's not_after, zero for none.
+	deadline  time.Time
 	waitUntil time.Time
 	checkAt   time.Time
 	// active makes the loop poll for the result.
@@ -45,6 +47,8 @@ type upgradeArgs struct {
 	Scope           *string `json:"scope"`
 	RestartServices *bool   `json:"restart_services"`
 	AgentVersion    *string `json:"agent_version"`
+	// NotAfter is the deadline for starting, see parseDeadline.
+	NotAfter json.RawMessage `json:"not_after"`
 }
 
 // upgradeDisabledDetail is the detail of an upgrade the operator turned off.
@@ -77,36 +81,54 @@ func (daemon *daemon) failUpgrade(id, code, scope, detail string) {
 	daemon.finishCommandData(id, CommandFailed, detail, upgradeData(code, scope))
 }
 
-// parseUpgradeArgs validates upgrade_packages' arguments strictly.
-func parseUpgradeArgs(raw json.RawMessage) (upgrader.Request, error) {
+// parseUpgradeArgs validates upgrade_packages' arguments strictly, and
+// returns the not_after deadline (zero for none) apart from the request the
+// helper gets: it only applies until the hand-over.
+func parseUpgradeArgs(raw json.RawMessage) (upgrader.Request, time.Time, error) {
+	request, args, err := decodeUpgradeArgs(raw)
+	if err != nil {
+		return upgrader.Request{}, time.Time{}, err
+	}
+	deadline, err := parseDeadline(args.NotAfter)
+	if err != nil {
+		return upgrader.Request{}, time.Time{}, err
+	}
+	return request, deadline, nil
+}
+
+func decodeUpgradeArgs(raw json.RawMessage) (upgrader.Request, upgradeArgs, error) {
 	var args upgradeArgs
 	decoder := json.NewDecoder(bytes.NewReader(bytes.TrimSpace(raw)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&args); err != nil {
-		return upgrader.Request{}, err
+		return upgrader.Request{}, args, err
 	}
 	switch {
 	case args.Scope == nil || !upgrader.ValidScope(*args.Scope):
-		return upgrader.Request{}, errors.New(`scope must be "security" or "all"`)
+		return upgrader.Request{}, args, errors.New(`scope must be "security" or "all"`)
 	case args.RestartServices == nil:
-		return upgrader.Request{}, errors.New("restart_services is required")
+		return upgrader.Request{}, args, errors.New("restart_services is required")
 	case args.AgentVersion != nil && !updater.ValidVersion(*args.AgentVersion):
-		return upgrader.Request{}, errors.New("agent_version must be null or a stable semantic version (X.Y.Z)")
+		return upgrader.Request{}, args, errors.New("agent_version must be null or a stable semantic version (X.Y.Z)")
 	}
 	request := upgrader.Request{Scope: *args.Scope, RestartServices: *args.RestartServices}
 	if args.AgentVersion != nil {
 		request.AgentVersion = *args.AgentVersion
 	}
-	return request, nil
+	return request, args, nil
 }
 
 // startUpgrade executes upgrade_packages: it validates the arguments,
 // checks the opt-out and the capability, then hands over once no package
 // manager runs, waiting up to an hour.
 func (daemon *daemon) startUpgrade(record commandRecord) {
-	request, err := parseUpgradeArgs(record.Args)
+	request, deadline, err := parseUpgradeArgs(record.Args)
 	if err != nil {
 		daemon.finishCommand(record.ID, CommandFailed, fmt.Sprintf("invalid args: %v", err))
+		return
+	}
+	if passed(deadline, daemon.options.Now()) {
+		daemon.failUpgrade(record.ID, upgrader.CodeTooLate, request.Scope, tooLateDetail(deadline))
 		return
 	}
 	if daemon.optOut().IsDisabled(optout.UpgradePackages) {
@@ -130,7 +152,8 @@ func (daemon *daemon) startUpgrade(record commandRecord) {
 	if lock, held := daemon.packageManagerBusy(); held {
 		log.Printf("[commands] %s %s: waiting for the package manager (%s) before upgrading", record.Kind, record.ID, lock)
 		daemon.upgrade.waiting = &record
-		daemon.upgrade.waitUntil = now.Add(upgradeLockPatience)
+		daemon.upgrade.deadline = deadline
+		daemon.upgrade.waitUntil = waitUntil(now.Add(upgradeLockPatience), deadline)
 		daemon.upgrade.checkAt = now.Add(upgradeLockRetry)
 		return
 	}
@@ -192,8 +215,11 @@ func (daemon *daemon) tickUpgrade(ctx context.Context, now time.Time) {
 	work := &daemon.upgrade
 	if work.waiting != nil && !now.Before(work.checkAt) {
 		record := *work.waiting
-		request, _ := parseUpgradeArgs(record.Args)
-		if lock, held := daemon.packageManagerBusy(); held {
+		request, _, _ := parseUpgradeArgs(record.Args)
+		if passed(work.deadline, now) {
+			work.waiting = nil
+			daemon.failUpgrade(record.ID, upgrader.CodeTooLate, request.Scope, tooLateDetail(work.deadline))
+		} else if lock, held := daemon.packageManagerBusy(); held {
 			if !now.Before(work.waitUntil) {
 				work.waiting = nil
 				daemon.failUpgrade(record.ID, upgrader.CodePackageManagerBusy, request.Scope,
@@ -265,7 +291,7 @@ func (daemon *daemon) pollUpgrade(ctx context.Context, now time.Time) {
 			continue
 		}
 		scope := ""
-		if parsed, err := parseUpgradeArgs(record.Args); err == nil {
+		if parsed, _, err := parseUpgradeArgs(record.Args); err == nil {
 			scope = parsed.Scope
 		}
 		log.Printf("[upgrade] %s has neither a request nor a result; reporting it failed", record.ID)

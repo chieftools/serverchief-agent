@@ -188,6 +188,8 @@ func TestUpgradeArgumentsAreValidatedStrictly(t *testing.T) {
 		`{"scope":"all","restart_services":"yes"}`,
 		`{"scope":"all","restart_services":true,"agent_version":"latest"}`,
 		`{"scope":"all","restart_services":true,"packages":["openssl"]}`,
+		`{"scope":"all","restart_services":true,"not_after":"in an hour"}`,
+		`{"scope":"all","restart_services":true,"not_after":1767225600}`,
 	} {
 		id := "bad" + string(rune('a'+index))
 		setup.command(t, daemon, id, args)
@@ -226,6 +228,44 @@ func TestUpgradeRefusalsAreReportedWithTheirCodes(t *testing.T) {
 	}
 	if setup.upgrades.launchCount() != 0 {
 		t.Fatal("launched a refused upgrade")
+	}
+}
+
+func TestUpgradeIsNotStartedAfterItsDeadline(t *testing.T) {
+	setup := newUpgradeSetup(t)
+	setup.packages = &fakePackages{lock: "/var/lib/dpkg/lock-frontend"}
+	daemon := setup.start(t)
+	tick(t, daemon)
+
+	past := setup.clock.Now().Add(-time.Second).UTC().Format(time.RFC3339)
+	setup.command(t, daemon, "u1", `{"scope":"security","restart_services":true,"agent_version":null,"not_after":"`+past+`"}`)
+	if results := setup.server.resultsOf("u1"); len(results) != 1 || results[0].Status != CommandFailed || upgradeResultData(t, results[0]).Code != upgrader.CodeTooLate {
+		t.Fatalf("u1 results = %+v", results)
+	}
+
+	// Waiting for the package manager stops at the deadline, not after an hour.
+	deadline := setup.clock.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)
+	setup.command(t, daemon, "u2", `{"scope":"all","restart_services":false,"not_after":"`+deadline+`"}`)
+	setup.clock.advance(9 * time.Minute)
+	tick(t, daemon)
+	if len(setup.server.resultsOf("u2")) != 0 {
+		t.Fatal("gave up before the deadline")
+	}
+	setup.clock.advance(time.Minute)
+	tick(t, daemon)
+	results := setup.server.resultsOf("u2")
+	if len(results) != 1 || upgradeResultData(t, results[0]).Code != upgrader.CodeTooLate || upgradeResultData(t, results[0]).Scope != "all" || daemon.upgrade.waiting != nil {
+		t.Fatalf("u2 results = %+v", results)
+	}
+
+	// Before the deadline the upgrade is handed over as usual.
+	setup.packages.mu.Lock()
+	setup.packages.lock = ""
+	setup.packages.mu.Unlock()
+	future := setup.clock.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	setup.command(t, daemon, "u3", `{"scope":"all","restart_services":true,"not_after":"`+future+`"}`)
+	if setup.upgrades.launchCount() != 1 {
+		t.Fatalf("launches = %d", setup.upgrades.launchCount())
 	}
 }
 
