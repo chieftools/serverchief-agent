@@ -9,6 +9,13 @@ release.
 
 ## [Unreleased]
 
+### Added
+
+- Server Chief can reboot the server from the dashboard with the new `reboot` command. The agent waits for a running package manager to finish, schedules the reboot a minute ahead with `shutdown -r +1` so logged-in users are warned, and reports the result with the new boot time after the server is back. Application containers such as Docker cannot be rebooted and report why.
+- `serverchief disable`, `serverchief enable` and `serverchief capabilities` turn remote actions (`reboot`, and `upgrade_packages` for installing package updates later) off and on again on the server itself. The setting is stored in `/etc/serverchief/disabled-capabilities.json`, which the dashboard cannot change, and the dashboard shows a turned-off action as such.
+- Command results include the output of what the command ran, so the dashboard can show it.
+- The agent speaks revision 1.2.0 of the agent protocol.
+
 ## [0.3.1]
 
 ### Fixed

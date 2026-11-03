@@ -48,6 +48,9 @@ const (
 	// ActionStartAgentUpdate starts the update helper for the update
 	// request the daemon wrote to its state directory.
 	ActionStartAgentUpdate = "start-agent-update"
+	// ActionReboot schedules a reboot in one minute (shutdown -r +1). It
+	// refuses when the operator turned reboot off, which it reads itself.
+	ActionReboot = "reboot"
 )
 
 const (

@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"strconv"
 	"strings"
@@ -218,4 +219,26 @@ func (host *Host) readTimezone() string {
 		return "unknown"
 	}
 	return "UTC"
+}
+
+// BootID is the kernel's random boot ID, which changes with every boot.
+func (host *Host) BootID() (string, error) {
+	data, err := host.readFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(string(data))
+	if id == "" {
+		return "", errors.New("the boot ID is empty")
+	}
+	return id, nil
+}
+
+// BootTime is the kernel boot time from /proc/stat, nil when unknown.
+func (host *Host) BootTime() *time.Time {
+	parsed, err := time.Parse(time.RFC3339, host.readBootTime())
+	if err != nil {
+		return nil
+	}
+	return &parsed
 }

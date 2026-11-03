@@ -1,0 +1,12 @@
+{
+  "data": {
+    "boot_time": "2026-10-22T14:13:41Z",
+    "code": "rebooted",
+    "previous_boot_time": "2026-10-18T05:37:22Z"
+  },
+  "detail": null,
+  "finished_at": "2026-10-22T14:14:20Z",
+  "output": "$ /sbin/shutdown -r +1 Server Chief: rebooting in 1 minute, requested from the panel\nShutdown scheduled for Thu 2026-10-22 14:13:03 UTC, use 'shutdown -c' to cancel.\n",
+  "output_truncated": false,
+  "status": "succeeded"
+}

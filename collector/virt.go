@@ -183,3 +183,9 @@ func (host *Host) procFromLxcfs() bool {
 	}
 	return false
 }
+
+// Container is the container technology the host runs in, such as docker,
+// lxc or nspawn, or "" outside a container.
+func (host *Host) Container() string {
+	return host.detectContainer()
+}

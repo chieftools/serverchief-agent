@@ -13,6 +13,7 @@ import (
 	"go.chief.tools/serverchief-agent/helper"
 	"go.chief.tools/serverchief-agent/initsys"
 	"go.chief.tools/serverchief-agent/logging"
+	"go.chief.tools/serverchief-agent/optout"
 	"go.chief.tools/serverchief-agent/updater"
 )
 
@@ -94,5 +95,6 @@ func helperActions() helper.Actions {
 				return helper.Result{}
 			},
 		},
+		helper.ActionReboot: rebootAction(optout.Path, 0),
 	}
 }

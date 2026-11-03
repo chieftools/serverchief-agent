@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"go.chief.tools/serverchief-agent/execlog"
 	"go.chief.tools/serverchief-agent/inventory"
 )
 
@@ -40,9 +41,10 @@ const (
 	// commandAcknowledged: acknowledged and executing. A restart in this
 	// state reports failed instead of executing it a second time.
 	commandAcknowledged commandState = "acknowledged"
-	// commandHandedOff: an update_agent the detached helper carries out.
-	// A restart neither runs it again nor reports it interrupted; the
-	// helper's result file finishes it.
+	// commandHandedOff: an update_agent the detached helper carries out,
+	// or a reboot the root helper scheduled. A restart neither runs it
+	// again nor reports it interrupted; the helper's result file, or the
+	// boot ID, finishes it.
 	commandHandedOff commandState = "handed_off"
 	// commandFinished: executed; Result holds the outcome.
 	commandFinished commandState = "finished"
@@ -239,9 +241,11 @@ func (daemon *daemon) requestCommands(now time.Time) {
 
 // recoverCommands resumes the journal after a start: unacknowledged
 // commands are acknowledged and executed, commands that were executing
-// when the agent stopped are reported failed rather than run twice, and
-// unreported results are sent.
+// when the agent stopped are reported failed rather than run twice,
+// handed-off reboots are checked against the boot ID, and unreported
+// results are sent.
 func (daemon *daemon) recoverCommands(now time.Time) {
+	defer daemon.checkReboots(now)
 	for _, record := range daemon.commands.snapshot() {
 		switch record.State {
 		case commandReceived:
@@ -250,6 +254,9 @@ func (daemon *daemon) recoverCommands(now time.Time) {
 			log.Printf("[commands] %s %s was interrupted by a restart; reporting it failed", record.Kind, record.ID)
 			daemon.finishCommand(record.ID, CommandFailed, "the agent restarted before the command finished")
 		case commandHandedOff:
+			if record.Kind == CommandReboot {
+				continue
+			}
 			log.Printf("[commands] %s %s is with the update helper; waiting for its result", record.Kind, record.ID)
 			daemon.update.active = true
 			daemon.update.inProgress = true
@@ -414,6 +421,8 @@ func (daemon *daemon) execute(record commandRecord) {
 		daemon.waiters = append(daemon.waiters, waiter)
 	case CommandUpdateAgent:
 		daemon.startUpdate(record)
+	case CommandReboot:
+		daemon.startReboot(record)
 	case CommandRefreshConfig:
 		log.Printf("[commands] %s %s: fetching the configuration", record.Kind, record.ID)
 		daemon.configPending = true
@@ -507,12 +516,23 @@ func (daemon *daemon) finishCommand(id, status, detail string) {
 
 // finishCommandData is finishCommand with kind-specific result data.
 func (daemon *daemon) finishCommandData(id, status, detail string, data json.RawMessage) {
+	daemon.finishCommandOutput(id, status, detail, data, "", false)
+}
+
+// finishCommandOutput is finishCommandData with the output of what the
+// command ran (execlog), left out when empty.
+func (daemon *daemon) finishCommandOutput(id, status, detail string, data json.RawMessage, output string, truncated bool) {
 	now := daemon.options.Now()
 	record := daemon.commands.get(id)
 	if record == nil {
 		record = &commandRecord{ID: id}
 	}
 	result := CommandResult{Status: status, FinishedAt: now.UTC().Truncate(time.Second), Data: data}
+	if output != "" {
+		text, cut := execlog.Cap(output)
+		truncated = truncated || cut
+		result.Output, result.OutputTruncated = &text, &truncated
+	}
 	if runes := []rune(detail); len(runes) > maximumDetailRunes {
 		detail = string(runes[:maximumDetailRunes-1]) + "…"
 	}

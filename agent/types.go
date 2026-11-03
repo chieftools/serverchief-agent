@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"time"
+
+	"go.chief.tools/serverchief-agent/optout"
 )
 
 const (
 	// ProtocolRevision is the agent ↔ backend protocol this build speaks.
-	ProtocolRevision = "1.1.0"
+	ProtocolRevision = "1.2.0"
 	// ProtocolHeader carries ProtocolRevision on every request.
 	ProtocolHeader = "ServerChief-Protocol-Revision"
 	// DefaultEndpoint is the production agent API.
@@ -55,6 +57,10 @@ type Paths struct {
 	Updates string
 	// Metrics is the metrics spool: samples waiting for the gateway.
 	Metrics string
+	// RebootRequest is the reboot in progress, kept across the reboot.
+	RebootRequest string
+	// DisabledCapabilities is the operator's opt-out (optout.Path).
+	DisabledCapabilities string
 	// Log is the file log used on hosts without journald.
 	Log string
 }
@@ -77,7 +83,10 @@ func DefaultPaths() Paths {
 		MetadataRefresh: "/var/lib/serverchief/metadata-refresh.json",
 		Updates:         "/var/lib/serverchief",
 		Metrics:         "/var/lib/serverchief/metrics",
+		RebootRequest:   "/var/lib/serverchief/reboot-request.json",
 		Log:             "/var/log/serverchief/agent.log",
+
+		DisabledCapabilities: optout.Path,
 	}
 }
 
@@ -91,6 +100,7 @@ func (paths Paths) WithStateDirectory(directory string) Paths {
 	paths.MetadataRefresh = filepath.Join(directory, "metadata-refresh.json")
 	paths.Updates = directory
 	paths.Metrics = filepath.Join(directory, "metrics")
+	paths.RebootRequest = filepath.Join(directory, "reboot-request.json")
 	return paths
 }
 
@@ -241,6 +251,20 @@ type Capabilities struct {
 	// Metrics reports delivery to the metrics gateway; nil when the build
 	// has no metrics.
 	Metrics *MetricsCapability `json:"metrics,omitempty"`
+	// Reboot tells whether the backend may send reboot (1.2.0); nil when
+	// the operator turned it off.
+	Reboot *ActionCapability `json:"reboot,omitempty"`
+	// Disabled lists the capabilities the operator turned off with
+	// `serverchief disable` (1.2.0), sorted. The daemon always sends it,
+	// empty when nothing is turned off.
+	Disabled []string `json:"disabled"`
+}
+
+// ActionCapability tells the backend whether it may send a remote action;
+// Reason explains why not.
+type ActionCapability struct {
+	Available bool    `json:"available"`
+	Reason    *string `json:"reason"`
 }
 
 // MetricsCapability tells the backend whether samples arrive.
@@ -292,6 +316,9 @@ const (
 	// CommandUpdateAgent installs {"version": "X.Y.Z"} of the agent
 	// package through the detached update helper.
 	CommandUpdateAgent = "update_agent"
+	// CommandReboot reboots the server ({}) unless the operator turned it
+	// off (1.2.0).
+	CommandReboot = "reboot"
 )
 
 // Command result statuses.
@@ -325,9 +352,34 @@ type CommandResult struct {
 	Detail     *string   `json:"detail"`
 	FinishedAt time.Time `json:"finished_at"`
 	// Data is kind-specific and optional (AgentUpdateData for
-	// update_agent); at most 4 KiB.
+	// update_agent, RebootData for reboot); at most 4 KiB.
 	Data json.RawMessage `json:"data,omitempty"`
+	// Output is what the command ran and printed (1.2.0), at most 1 MiB
+	// (execlog). OutputTruncated is set with it, true when its beginning
+	// was cut off.
+	Output          *string `json:"output,omitempty"`
+	OutputTruncated *bool   `json:"output_truncated,omitempty"`
 }
+
+// RebootData is the data of a reboot result
+// (fixtures/reboot-result-request.json).
+type RebootData struct {
+	Code string `json:"code"`
+	// PreviousBootTime is the boot time when the reboot was requested,
+	// BootTime when the result was decided; nil when unknown.
+	PreviousBootTime *time.Time `json:"previous_boot_time"`
+	BootTime         *time.Time `json:"boot_time"`
+}
+
+// Reboot result codes.
+const (
+	RebootCodeRebooted           = "rebooted"
+	RebootCodeNotRebooted        = "not_rebooted"
+	RebootCodeDisabled           = "disabled"
+	RebootCodeUnsupported        = "unsupported"
+	RebootCodePackageManagerBusy = "package_manager_busy"
+	RebootCodeFailed             = "reboot_failed"
+)
 
 // AgentUpdateData is the data of an update_agent result
 // (fixtures/update-agent-result-request.json).

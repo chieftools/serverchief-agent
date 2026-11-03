@@ -17,6 +17,7 @@ import (
 	"go.chief.tools/serverchief-agent/inventory"
 	"go.chief.tools/serverchief-agent/logging"
 	"go.chief.tools/serverchief-agent/metrics"
+	"go.chief.tools/serverchief-agent/optout"
 	"go.chief.tools/serverchief-agent/systemdnotify"
 	"go.chief.tools/serverchief-agent/updater"
 )
@@ -168,7 +169,11 @@ the systemd unit does not restart.`,
 				RecordRefresh:  recordRefresh,
 				ChangePoll:     changePoll,
 				Updates:        updates,
-				Metrics:        sampler,
+				Reboots:        newReboots(paths.RebootRequest, privilege, host),
+				OptOut: func() optout.State {
+					return optout.Load(paths.DisabledCapabilities, 0)
+				},
+				Metrics: sampler,
 				Ready: func() {
 					_ = systemdnotify.NotifyReady("collecting inventory")
 				},

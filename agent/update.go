@@ -86,6 +86,9 @@ func (daemon *daemon) capabilities(ctx context.Context) *Capabilities {
 		status := metrics.Status()
 		result.Metrics = &status
 	}
+	optOut := daemon.optOut()
+	result.Disabled = optOut.Disabled
+	result.Reboot = daemon.rebootCapability(ctx, optOut)
 	return result
 }
 
@@ -175,10 +178,10 @@ func (daemon *daemon) startUpdate(record commandRecord) {
 	daemon.update.pollAt = now.Add(daemon.updatePoll())
 }
 
-// handedOff returns another handed-off command's ID, or "".
+// handedOff returns another handed-off update_agent's ID, or "".
 func (daemon *daemon) handedOff(except string) string {
 	for _, record := range daemon.commands.snapshot() {
-		if record.State == commandHandedOff && record.ID != except {
+		if record.Kind == CommandUpdateAgent && record.State == commandHandedOff && record.ID != except {
 			return record.ID
 		}
 	}
@@ -232,7 +235,7 @@ func (daemon *daemon) pollUpdate(ctx context.Context, now time.Time) {
 
 	handedOff := 0
 	for _, record := range daemon.commands.snapshot() {
-		if record.State != commandHandedOff {
+		if record.Kind != CommandUpdateAgent || record.State != commandHandedOff {
 			continue
 		}
 		if request != nil && request.CommandID == record.ID || result != nil && result.CommandID == record.ID {

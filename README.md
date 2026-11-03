@@ -142,11 +142,27 @@ The packaged daemon runs as the `serverchief` system user, not as root. `serverc
 
 Where `/proc` is mounted with `hidepid` (CloudLinux, hardened hosts), the package adds the `serverchief` user to the group the mount's `gid=` option names, such as CloudLinux's `clsupergid`, so it sees every process as it does on other hosts; `needs-restarting -r` reads the boot time from `/proc/1`. The command lines of other users' processes become readable to it, while their environment and memory stay private. Without a `gid=` option the RHEL reboot flag is reported as unknown.
 
-The few things that need root go through the root helper: the daemon writes a request to `/var/lib/serverchief/helper/`, `serverchief-helper.path` starts `serverchief-helper.service` (`serverchief internal-helper`, root, oneshot), and the helper writes the result back. It knows a fixed list of actions without arguments: `ping`, `refresh-metadata` (the package metadata refresh), `plesk-sites` (reads the Plesk sites; the helper builds the queries) and `start-agent-update`. It opens requests without following symbolic links, only accepts small files of the directory's owner and creates results as new files.
+The few things that need root go through the root helper: the daemon writes a request to `/var/lib/serverchief/helper/`, `serverchief-helper.path` starts `serverchief-helper.service` (`serverchief internal-helper`, root, oneshot), and the helper writes the result back. It knows a fixed list of actions without arguments: `ping`, `refresh-metadata` (the package metadata refresh), `plesk-sites` (reads the Plesk sites; the helper builds the queries), `apache-vhosts`, `start-agent-update` and `reboot` (schedules a reboot in one minute unless the operator turned it off, which the helper checks itself). It opens requests without following symbolic links, only accepts small files of the directory's owner and creates results as new files.
 
 Where systemd cannot grant ambient capabilities (before 229, such as CentOS 7) the package installs `/etc/systemd/system/serverchief.service` from `/usr/share/serverchief/serverchief-root.service`, and under SysV the init script runs the daemon as root: it then runs the same actions in-process. An update from a version that ran as root (before 0.2.0) finishes as root and then switches to the `serverchief` user on its own (`serverchief internal-unprivilege`). Every heartbeat reports the mode and the available helper actions, and the backend records a change of mode.
 
 Because the daemon can read every file, a symbolic link inside a hosting user's tree is only followed when it stays inside that tree, and files are read up to a size cap.
+
+### Remote actions and the opt-out
+
+Server Chief can ask the agent to reboot the server (`reboot`). Remote actions are available by default; whoever runs the server can turn them off on the server itself:
+
+```bash
+sudo serverchief disable reboot upgrade_packages   # turn remote actions off
+sudo serverchief enable reboot                     # turn one on again
+serverchief capabilities                           # list them with their state
+```
+
+The capabilities are `reboot` and `upgrade_packages`, which is reserved for installing package updates from the dashboard; it can be turned off before the agent supports it. Agent updates cannot be turned off this way; turn off automatic updates for the team or server instead.
+
+The setting lives in `/etc/serverchief/disabled-capabilities.json` (`{"version": 1, "disabled": [...]}`, `root:root 0644`), apart from `config.json`. The agent only reads it and nothing the backend sends changes it. A file that cannot be read, that does not belong to root, that its group or others can write, or that is not valid turns every remote action off. `disable` and `enable` need root and ask a running daemon to reload, so its next heartbeat reports the change right away; otherwise it is picked up within one heartbeat. A turned-off capability is left out of the heartbeat's `capabilities` and listed in `capabilities.disabled`, so the dashboard shows it as turned off on the server rather than unsupported. A command for it fails with code `disabled`, checked by the daemon and again by the root helper.
+
+**Reboots.** The heartbeat's `capabilities.reboot` is available when the root helper answers (or the daemon runs as root), the server is not an application container (Docker, Podman, Kubernetes, WSL; LXC, systemd-nspawn, OpenVZ and virtual machines can reboot) and `shutdown` exists (`systemctl reboot` on systemd without it). For `reboot {}` the daemon waits for package-manager locks (checking every 30 s, for up to 15 minutes, then `package_manager_busy`), journals the command as `handed_off`, writes `reboot-request.json` (command ID, boot ID from `/proc/sys/kernel/random/boot_id`, boot time) and has the root helper run `shutdown -r +1 "Server Chief: rebooting in 1 minute, requested from the panel"`. On the next start a new boot ID reports `rebooted`; the same boot ID ten minutes after the request (a cancelled shutdown) reports `not_rebooted`. The result carries `data: {code, previous_boot_time, boot_time}` and the `output` of the shutdown command. Other codes are `disabled`, `unsupported` and `reboot_failed`; unknown arguments are rejected.
 
 ### Agent updates
 

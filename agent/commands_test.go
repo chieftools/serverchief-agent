@@ -22,7 +22,8 @@ func TestCommandFixturesRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(fixture, &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Commands) != 2 || response.Commands[0].Kind != CommandRefreshInventory || response.Commands[1].Kind != CommandResync ||
+	if len(response.Commands) != 3 || response.Commands[0].Kind != CommandRefreshInventory || response.Commands[1].Kind != CommandResync ||
+		response.Commands[2].Kind != CommandReboot || string(response.Commands[2].Args) != "{}" ||
 		response.Commands[0].ExpiresAt.Sub(response.Commands[0].CreatedAt) != 24*time.Hour {
 		t.Fatalf("commands = %+v", response.Commands)
 	}
@@ -72,7 +73,7 @@ func TestHTTPClientCommandEndpoints(t *testing.T) {
 	client := NewClient(server.URL+"/agent/v1", "scagt_secret", "1.2.3", server.Client())
 
 	fetched, err := client.FetchCommands(ctx)
-	if err != nil || len(fetched) != 2 || fetched[0].ID != "01jb9a2c3d4e5f6g7h8j9k0m1n" || string(fetched[1].Args) != `{
+	if err != nil || len(fetched) != 3 || fetched[0].ID != "01jb9a2c3d4e5f6g7h8j9k0m1n" || string(fetched[1].Args) != `{
         "datasets": [
           "packages"
         ]
@@ -223,7 +224,7 @@ func TestUnknownCommandKindIsAcknowledgedAndFailed(t *testing.T) {
 	daemon := setup.start(t)
 	tick(t, daemon)
 
-	setup.server.addCommand("c9", "reboot", `{}`)
+	setup.server.addCommand("c9", "format_disk", `{}`)
 	before := len(setup.server.requestLog())
 	heartbeatNow(daemon)
 	tick(t, daemon)
@@ -231,7 +232,7 @@ func TestUnknownCommandKindIsAcknowledgedAndFailed(t *testing.T) {
 		t.Fatalf("requests = %q", got)
 	}
 	results := setup.server.resultsOf("c9")
-	if len(results) != 1 || results[0].Status != CommandFailed || results[0].Detail == nil || *results[0].Detail != `unsupported command kind "reboot"` {
+	if len(results) != 1 || results[0].Status != CommandFailed || results[0].Detail == nil || *results[0].Detail != `unsupported command kind "format_disk"` {
 		t.Fatalf("results = %+v", results)
 	}
 }

@@ -15,6 +15,7 @@ import (
 
 	"go.chief.tools/serverchief-agent/collector"
 	"go.chief.tools/serverchief-agent/inventory"
+	"go.chief.tools/serverchief-agent/optout"
 	"go.chief.tools/serverchief-agent/updater"
 )
 
@@ -74,6 +75,12 @@ type RunOptions struct {
 	// Metrics receives the backend's metrics setting. Nil leaves metrics
 	// out.
 	Metrics Metrics
+	// Reboots carries out reboot and reports the capability. Nil reports
+	// reboots unsupported.
+	Reboots *Reboots
+	// OptOut reads the operator's opt-out before every heartbeat and
+	// command (optout.Load). Nil means nothing is turned off.
+	OptOut func() optout.State
 	// UpdatePoll is how often the helper's result is looked for (5 s).
 	UpdatePoll time.Duration
 	Now        func() time.Time
@@ -126,6 +133,11 @@ type daemon struct {
 	packages packageWork
 	// update is the agent update hand-over and readiness state.
 	update updateWork
+	// reboot is a reboot waiting for the package manager or for its
+	// verification.
+	reboot rebootWork
+	// optOutError is the last opt-out error logged.
+	optOutError string
 }
 
 // Run heartbeats, collects datasets on their schedules and delivers changes
@@ -230,6 +242,10 @@ func (daemon *daemon) loop(ctx context.Context) error {
 			daemon.scheduleAll(options.Now())
 			daemon.scheduleRefresh(options.Now())
 			daemon.pruneWaiters()
+			if !daemon.unsupported {
+				// The opt-out may have changed (serverchief disable).
+				daemon.heartbeatAt = options.Now()
+			}
 			log.Printf("[config] reloaded; collecting %d datasets now", len(daemon.next))
 		case <-daemon.commandsWake:
 			timer.Stop()
@@ -284,6 +300,7 @@ func (daemon *daemon) tick(ctx context.Context) error {
 		}
 	}
 	daemon.pollUpdate(ctx, options.Now())
+	daemon.tickReboot(options.Now())
 	if !daemon.unsupported {
 		if err := daemon.sendResults(ctx); err != nil {
 			return err
@@ -311,6 +328,9 @@ func (daemon *daemon) wakeAt() time.Time {
 	}
 	if daemon.options.Updates != nil && daemon.update.active && daemon.update.pollAt.Before(wakeAt) {
 		wakeAt = daemon.update.pollAt
+	}
+	if at := daemon.rebootWakeAt(); !at.IsZero() && at.Before(wakeAt) {
+		wakeAt = at
 	}
 	if !daemon.unsupported {
 		if daemon.commandsPending && daemon.commandsAt.Before(wakeAt) {

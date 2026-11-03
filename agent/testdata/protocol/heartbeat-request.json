@@ -5,6 +5,9 @@
       "available": true,
       "reason": null
     },
+    "disabled": [
+      "upgrade_packages"
+    ],
     "metrics": {
       "enabled": true,
       "error": null,
@@ -16,10 +19,15 @@
       "helper_actions": [
         "ping",
         "plesk-sites",
+        "reboot",
         "refresh-metadata",
         "start-agent-update"
       ],
       "mode": "unprivileged",
+      "reason": null
+    },
+    "reboot": {
+      "available": true,
       "reason": null
     }
   },
