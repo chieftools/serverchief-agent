@@ -265,6 +265,28 @@ func TestApplicationRootStaysInTheUsersTree(t *testing.T) {
 	}
 }
 
+func TestApplicationRootsLinkedToOneDirectoryAreOneApplication(t *testing.T) {
+	// DirectAdmin links private_html to public_html, the order of the sites
+	// must not decide the path.
+	domain := "home/admin/domains/example.test"
+	for _, sites := range []string{
+		nginxSite("secure.example.test", "/"+domain+"/private_html") + nginxSite("example.test", "/"+domain+"/public_html"),
+		nginxSite("example.test", "/"+domain+"/public_html") + nginxSite("secure.example.test", "/"+domain+"/private_html"),
+	} {
+		host := &Host{FS: fstest.MapFS{
+			"usr/sbin/nginx":                      mapFile(nil),
+			"etc/nginx/nginx.conf":                mapFile([]byte("events {}\nhttp {\n" + sites + "}\n")),
+			domain + "/private_html":              symlink("./public_html"),
+			domain + "/public_html/composer.json": mapFile([]byte("{}")),
+		}, Root: "/"}
+		info := collectApplications(t, NewApplications(host, nil))
+		if len(info.Items) != 1 || info.Items[0].Path != "/"+domain+"/public_html" ||
+			!slices.Equal(info.Items[0].Sites, []string{"nginx/example.test", "nginx/secure.example.test"}) {
+			t.Fatalf("items = %+v", info.Items)
+		}
+	}
+}
+
 func TestApplicationsLimits(t *testing.T) {
 	host, tracker := applicationsHost(t)
 	var packages []any

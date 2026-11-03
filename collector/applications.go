@@ -267,15 +267,18 @@ func (collector *Applications) Collect(ctx context.Context) (any, error) {
 		if root == "" {
 			continue
 		}
-		item, seen := run.roots[root]
+		directory := run.directory(root)
+		item, seen := run.roots[directory]
 		if !seen {
 			if len(run.roots) >= maxApplications {
 				run.truncated = true
 				continue
 			}
 			item = &Application{Path: root}
-			run.roots[root] = item
-			run.order = append(run.order, root)
+			run.roots[directory] = item
+			run.order = append(run.order, directory)
+		} else if preferredPath(root, item.Path, directory) {
+			item.Path = root
 		}
 		item.Sites = append(item.Sites, VHostKey(site))
 		if item.Owner == nil && site.Owner != nil {
@@ -285,11 +288,11 @@ func (collector *Applications) Collect(ctx context.Context) (any, error) {
 
 	slices.Sort(run.order)
 	info := &ApplicationsInfo{Items: make([]Application, 0, len(run.order))}
-	for _, root := range run.order {
+	for _, directory := range run.order {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		item := run.roots[root]
+		item := run.roots[directory]
 		run.inspect(item)
 		info.Items = append(info.Items, *item)
 	}
@@ -308,7 +311,10 @@ func (collector *Applications) Collect(ctx context.Context) (any, error) {
 
 // applicationRun gathers the applications of one collection.
 type applicationRun struct {
-	host      *Host
+	host *Host
+	// roots are the applications by the directory their root resolves to,
+	// so roots linked to one directory (DirectAdmin's private_html to
+	// public_html) are one application.
 	roots     map[string]*Application
 	order     []string
 	entries   int
@@ -319,6 +325,29 @@ type applicationRun struct {
 
 func (run *applicationRun) warn(format string, args ...any) {
 	run.warnings = append(run.warnings, fmt.Sprintf(format, args...))
+}
+
+// directory returns the directory an application root resolves to with
+// resolvePath's policy, the root itself when it cannot be resolved.
+func (run *applicationRun) directory(root string) string {
+	resolved, info, err := run.host.resolvePath(root)
+	if err != nil || !info.IsDir() {
+		return root
+	}
+	return resolved
+}
+
+// preferredPath tells whether candidate is a better path than current for
+// the application in directory: the directory itself, else the shorter and
+// then lexically first path, so the key does not depend on site order.
+func preferredPath(candidate, current, directory string) bool {
+	if (candidate == directory) != (current == directory) {
+		return candidate == directory
+	}
+	if len(candidate) != len(current) {
+		return len(candidate) < len(current)
+	}
+	return candidate < current
 }
 
 // applicationRoot returns the application root of a document root, "" when

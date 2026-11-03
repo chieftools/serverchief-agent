@@ -18,6 +18,10 @@ release.
 - The Debian package installs `/etc/needrestart/conf.d/serverchief.conf`, so needrestart never restarts the agent.
 - The agent speaks revision 1.2.0 of the agent protocol.
 
+### Fixed
+
+- Fixed one application being listed twice when its sites use document roots linked to the same directory, such as DirectAdmin's `private_html` linked to `public_html`. These sites are now one application, reported at the directory itself rather than at the link.
+
 ## [0.3.1]
 
 ### Fixed
