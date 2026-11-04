@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.4.0]
+
 ### Added
 
 - Server Chief can reboot the server from the dashboard with the new `reboot` command. The agent waits for a running package manager to finish, schedules the reboot a minute ahead with `shutdown -r +1` so logged-in users are warned, and reports the result with the new boot time after the server is back. Application containers such as Docker cannot be rebooted and report why.
@@ -141,7 +143,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.4.0
 [0.3.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.3.1
 [0.3.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.3.0
 [0.2.8]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.2.8
