@@ -405,6 +405,8 @@ const (
 	RebootCodePackageManagerBusy = "package_manager_busy"
 	RebootCodeFailed             = "reboot_failed"
 	RebootCodeTooLate            = "too_late"
+	RebootCodeNotRequired        = "not_required"
+	RebootCodeRequiredUnknown    = "required_unknown"
 )
 
 // UpgradePackagesData is the data of an upgrade_packages result

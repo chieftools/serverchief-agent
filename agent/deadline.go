@@ -12,22 +12,36 @@ import (
 // so one a later revision adds is never ignored silently.
 type rebootArgs struct {
 	NotAfter json.RawMessage `json:"not_after"`
+	// IfRequired only reboots when the host needs it; absent or false
+	// reboots regardless.
+	IfRequired *bool `json:"if_required"`
 }
 
-// parseRebootArgs validates reboot's arguments and returns its not_after
-// deadline, zero for none.
-func parseRebootArgs(raw json.RawMessage) (time.Time, error) {
+// rebootOptions are what a reboot command asks for.
+type rebootOptions struct {
+	// deadline is its not_after, zero for none.
+	deadline time.Time
+	// ifRequired only reboots when the host needs a reboot.
+	ifRequired bool
+}
+
+// parseRebootArgs validates reboot's arguments.
+func parseRebootArgs(raw json.RawMessage) (rebootOptions, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		return time.Time{}, nil
+		return rebootOptions{}, nil
 	}
 	var args rebootArgs
 	decoder := json.NewDecoder(bytes.NewReader(trimmed))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&args); err != nil {
-		return time.Time{}, err
+		return rebootOptions{}, err
 	}
-	return parseDeadline(args.NotAfter)
+	deadline, err := parseDeadline(args.NotAfter)
+	if err != nil {
+		return rebootOptions{}, err
+	}
+	return rebootOptions{deadline: deadline, ifRequired: args.IfRequired != nil && *args.IfRequired}, nil
 }
 
 // parseDeadline reads a command's not_after: an RFC 3339 time, or null or

@@ -47,6 +47,9 @@ type Reboots struct {
 	BootID func() (string, error)
 	// BootTime is the kernel boot time, nil when unknown.
 	BootTime func() *time.Time
+	// Required tells whether the host needs a reboot, for if_required;
+	// nil when it cannot tell.
+	Required func(ctx context.Context) *bool
 }
 
 // rebootRequest is reboot-request.json: the reboot in progress, kept
@@ -139,7 +142,8 @@ const rebootDisabledDetail = "rebooting is turned off on this server; `serverchi
 // startReboot executes reboot: it checks the opt-out and the capability,
 // then reboots once no package manager runs, waiting up to 15 minutes.
 func (daemon *daemon) startReboot(record commandRecord) {
-	deadline, err := parseRebootArgs(record.Args)
+	options, err := parseRebootArgs(record.Args)
+	deadline := options.deadline
 	if err != nil {
 		daemon.finishCommand(record.ID, CommandFailed, fmt.Sprintf("invalid args: %v", err))
 		return
@@ -215,13 +219,32 @@ func (daemon *daemon) packageManagerBusy() (string, bool) {
 
 // rebootNow persists the request and has the root helper schedule the
 // reboot. From then on only a changed boot ID, or ten minutes without one,
-// finishes the command.
+// finishes the command. With if_required it first checks, at this moment,
+// whether the host needs a reboot at all.
 func (daemon *daemon) rebootNow(record commandRecord) {
 	if daemon.optOut().IsDisabled(optout.Reboot) {
 		daemon.failReboot(record.ID, RebootCodeDisabled, rebootDisabledDetail, "", false)
 		return
 	}
 	control := daemon.options.Reboots
+	if options, _ := parseRebootArgs(record.Args); options.ifRequired {
+		var required *bool
+		if control.Required != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), rebootHelperTimeout)
+			required = control.Required(ctx)
+			cancel()
+		}
+		switch {
+		case required == nil:
+			// Rebooting blindly is worse than a run that shows it could not tell.
+			daemon.failReboot(record.ID, RebootCodeRequiredUnknown, "it cannot be told whether this server needs a reboot, so it was not rebooted", "", false)
+			return
+		case !*required:
+			bootTime := daemon.bootTime()
+			daemon.finishCommandData(record.ID, CommandSucceeded, "the server does not need a reboot", rebootData(RebootCodeNotRequired, bootTime, bootTime))
+			return
+		}
+	}
 	bootID, err := control.BootID()
 	if err != nil {
 		daemon.failReboot(record.ID, RebootCodeFailed, "read the boot ID: "+err.Error(), "", false)

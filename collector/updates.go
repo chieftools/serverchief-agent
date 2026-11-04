@@ -136,8 +136,7 @@ func (host *Host) aptUpdates(ctx context.Context) (*UpdatesInfo, error) {
 		return nil, fmt.Errorf("apt-get -s dist-upgrade exited with status %d: %s", result.ExitCode, firstLine(result.Stderr))
 	}
 	info := &UpdatesInfo{Manager: ManagerApt, Items: parseAptSimulation(result.Stdout)}
-	required := host.exists("/var/run/reboot-required") || host.exists("/run/reboot-required")
-	info.RebootRequired = &required
+	info.RebootRequired = host.aptRebootRequired()
 	info.CacheUpdatedAt = host.aptCacheUpdatedAt()
 	return info, nil
 }
@@ -379,6 +378,21 @@ func splitNEVRA(nevra string) (string, string, bool) {
 		rest = rest[:index]
 	}
 	return rest, arch, true
+}
+
+// RebootRequired tells whether the host needs a reboot, the way the updates
+// dataset does: Debian and Ubuntu's reboot-required flag file, or
+// `needs-restarting -r` on RHEL and derivatives. Nil when it cannot tell.
+func (host *Host) RebootRequired(ctx context.Context) *bool {
+	if host.exists(dpkgStatusPath) {
+		return host.aptRebootRequired()
+	}
+	return host.needsRestarting(ctx)
+}
+
+func (host *Host) aptRebootRequired() *bool {
+	required := host.exists("/var/run/reboot-required") || host.exists("/run/reboot-required")
+	return &required
 }
 
 // needsRestarting runs `needs-restarting -r` (yum-utils, dnf-utils):

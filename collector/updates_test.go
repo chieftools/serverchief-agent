@@ -345,3 +345,25 @@ func TestRPMCacheUpdatedAt(t *testing.T) {
 		t.Fatalf("yum without a cache: %v", got)
 	}
 }
+
+func TestRebootRequiredReadsTheFlagFileOnDebian(t *testing.T) {
+	for name, test := range map[string]struct {
+		files map[string]string
+		want  bool
+	}{
+		"flag":    {map[string]string{"var/lib/dpkg/status": "", "run/reboot-required": ""}, true},
+		"no flag": {map[string]string{"var/lib/dpkg/status": ""}, false},
+	} {
+		host, _ := fakeHost(t, "debian-12", test.files, nil)
+		if required := host.RebootRequired(context.Background()); required == nil || *required != test.want {
+			t.Errorf("%s: required = %v", name, required)
+		}
+	}
+}
+
+func TestRebootRequiredIsUnknownOnRHELWithoutNeedsRestarting(t *testing.T) {
+	host, _ := fakeHost(t, "almalinux-9", map[string]string{"var/lib/rpm/rpmdb.sqlite": ""}, nil)
+	if required := host.RebootRequired(context.Background()); required != nil {
+		t.Fatalf("required = %v", *required)
+	}
+}

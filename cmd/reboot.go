@@ -75,6 +75,7 @@ func newReboots(requestPath string, privilege *agent.PrivilegeProbe, host *colle
 		},
 		BootID:   host.BootID,
 		BootTime: host.BootTime,
+		Required: host.RebootRequired,
 	}
 }
 

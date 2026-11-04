@@ -26,6 +26,9 @@ type fakeReboots struct {
 	rebootErr error
 	reboots   int
 	path      string
+	// required is what the host says about needing a reboot, nil when it
+	// cannot tell.
+	required *bool
 }
 
 func newFakeReboots(t *testing.T) *fakeReboots {
@@ -63,6 +66,11 @@ func (fake *fakeReboots) control() *Reboots {
 			defer fake.mu.Unlock()
 			at := fake.bootTime
 			return &at
+		},
+		Required: func(context.Context) *bool {
+			fake.mu.Lock()
+			defer fake.mu.Unlock()
+			return fake.required
 		},
 	}
 }
@@ -465,6 +473,57 @@ func TestRebootRequestOutlivesALostJournal(t *testing.T) {
 	second := setup.start(t)
 	tick(t, second)
 	if results := setup.server.resultsOf("r1"); len(results) != 1 || rebootResultData(t, results[0]).Code != RebootCodeRebooted {
+		t.Fatalf("results = %+v", results)
+	}
+}
+
+func TestRebootIfRequiredOnlyRebootsWhenTheHostNeedsIt(t *testing.T) {
+	setup := newRebootSetup(t)
+	daemon := setup.start(t)
+	tick(t, daemon)
+
+	yes, no := true, false
+	setup.reboots.required = &no
+	setup.command(t, daemon, "r1", `{"if_required":true}`)
+	results := setup.server.resultsOf("r1")
+	if len(results) != 1 || results[0].Status != CommandSucceeded || rebootResultData(t, results[0]).Code != RebootCodeNotRequired || setup.reboots.count() != 0 {
+		t.Fatalf("not required: results = %+v, reboots %d", results, setup.reboots.count())
+	}
+
+	setup.reboots.required = nil
+	setup.command(t, daemon, "r2", `{"if_required":true}`)
+	results = setup.server.resultsOf("r2")
+	if len(results) != 1 || results[0].Status != CommandFailed || rebootResultData(t, results[0]).Code != RebootCodeRequiredUnknown || setup.reboots.count() != 0 {
+		t.Fatalf("unknown: results = %+v, reboots %d", results, setup.reboots.count())
+	}
+
+	setup.reboots.required = &yes
+	setup.command(t, daemon, "r3", `{"if_required":true}`)
+	if setup.reboots.count() != 1 || daemon.commands.get("r3").State != commandHandedOff {
+		t.Fatalf("required: reboots = %d", setup.reboots.count())
+	}
+}
+
+func TestRebootWithoutIfRequiredRebootsRegardless(t *testing.T) {
+	for _, args := range []string{`{}`, `{"if_required":false}`, `{"if_required":null}`} {
+		setup := newRebootSetup(t)
+		no := false
+		setup.reboots.required = &no
+		daemon := setup.start(t)
+		tick(t, daemon)
+		setup.command(t, daemon, "r1", args)
+		if setup.reboots.count() != 1 {
+			t.Fatalf("%s: reboots = %d", args, setup.reboots.count())
+		}
+	}
+}
+
+func TestRebootIfRequiredMustBeABoolean(t *testing.T) {
+	setup := newRebootSetup(t)
+	daemon := setup.start(t)
+	tick(t, daemon)
+	setup.command(t, daemon, "r1", `{"if_required":"yes"}`)
+	if results := setup.server.resultsOf("r1"); len(results) != 1 || !strings.HasPrefix(*results[0].Detail, "invalid args:") || setup.reboots.count() != 0 {
 		t.Fatalf("results = %+v", results)
 	}
 }
