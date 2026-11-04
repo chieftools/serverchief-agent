@@ -332,6 +332,24 @@ const (
 	// "restart_services", "agent_version"}) through the detached package
 	// upgrade helper unless the operator turned it off (1.2.0).
 	CommandUpgradePackages = "upgrade_packages"
+	// CommandDisableCapability turns a capability off on the server
+	// ({"capability"}); nothing turns one on again but `serverchief
+	// enable` (1.2.0).
+	CommandDisableCapability = "disable_capability"
+)
+
+// DisableCapabilityData is the data of a disable_capability result
+// (fixtures/disable-capability-result-request.json).
+type DisableCapabilityData struct {
+	Code       string `json:"code"`
+	Capability string `json:"capability"`
+}
+
+// disable_capability result codes.
+const (
+	DisableCodeDisabled        = "disabled"
+	DisableCodeAlreadyDisabled = "already_disabled"
+	DisableCodeFailed          = "disable_failed"
 )
 
 // Command result statuses.

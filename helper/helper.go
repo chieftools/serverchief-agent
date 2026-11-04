@@ -55,6 +55,11 @@ const (
 	// request the daemon wrote to its state directory. It refuses when the
 	// operator turned upgrade_packages off, which it reads itself.
 	ActionStartPackageUpgrade = "start-package-upgrade"
+	// ActionDisableCapability adds one known capability ({"capability"})
+	// to the operator's opt-out for the panel's disable_capability. It
+	// never removes one, so the panel can turn remote actions off but
+	// never on.
+	ActionDisableCapability = "disable-capability"
 )
 
 const (

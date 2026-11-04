@@ -139,6 +139,25 @@ func Validate(names []string) error {
 	return nil
 }
 
+// Disable adds a known capability to the opt-out at path, as root does for
+// the panel's disable_capability: it only ever adds a name, never removes
+// one. It reports whether it wrote the file. A file that cannot be
+// trusted already turns every capability off, and writing a new list over
+// it would turn the others on, so it is left alone.
+func Disable(path string, owner int, name string) (bool, error) {
+	if err := Validate([]string{name}); err != nil {
+		return false, err
+	}
+	state := Load(path, owner)
+	if state.Err != nil || state.IsDisabled(name) {
+		return false, nil
+	}
+	if err := Save(path, append(slices.Clone(state.Disabled), name)); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Save writes disabled to path atomically, readable by everyone (the
 // unprivileged daemon reads it) and writable by its owner only.
 func Save(path string, disabled []string) error {

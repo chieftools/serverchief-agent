@@ -430,6 +430,8 @@ func (daemon *daemon) execute(record commandRecord) {
 		daemon.startReboot(record)
 	case CommandUpgradePackages:
 		daemon.startUpgrade(record)
+	case CommandDisableCapability:
+		daemon.disableCapability(record)
 	case CommandRefreshConfig:
 		log.Printf("[commands] %s %s: fetching the configuration", record.Kind, record.ID)
 		daemon.configPending = true

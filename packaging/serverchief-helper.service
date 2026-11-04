@@ -10,7 +10,8 @@ StartLimitIntervalSec=0
 # lists, read the Plesk sites, list the Apache vhosts, start an agent update,
 # schedule a reboot (unless `serverchief disable reboot` turned it off),
 # start a package upgrade (unless `serverchief disable upgrade_packages`
-# turned it off), and answer a ping.
+# turned it off), turn a remote action off for the dashboard (it only ever
+# adds to the opt-out, never removes), and answer a ping.
 Type=oneshot
 User=root
 ExecStart=/usr/bin/serverchief internal-helper

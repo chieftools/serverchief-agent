@@ -1,0 +1,9 @@
+{
+  "data": {
+    "capability": "reboot",
+    "code": "disabled"
+  },
+  "detail": null,
+  "finished_at": "2026-10-22T14:14:05Z",
+  "status": "succeeded"
+}

@@ -95,7 +95,8 @@ func helperActions() helper.Actions {
 				return helper.Result{}
 			},
 		},
-		helper.ActionReboot: rebootAction(optout.Path, 0),
+		helper.ActionReboot:            rebootAction(optout.Path, 0),
+		helper.ActionDisableCapability: disableCapabilityAction(optout.Path, 0),
 		helper.ActionStartPackageUpgrade: startUpgradeAction(optout.Path, 0, func(ctx context.Context) error {
 			return upgradeLauncher(initsys.DetectSystem()).Launch(ctx)
 		}),

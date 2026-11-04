@@ -174,7 +174,8 @@ the systemd unit does not restart.`,
 				OptOut: func() optout.State {
 					return optout.Load(paths.DisabledCapabilities, 0)
 				},
-				Metrics: sampler,
+				DisableCapability: newCapabilityDisabler(privilege),
+				Metrics:           sampler,
 				Ready: func() {
 					_ = systemdnotify.NotifyReady("collecting inventory")
 				},

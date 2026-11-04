@@ -90,6 +90,10 @@ type RunOptions struct {
 	// OptOut reads the operator's opt-out before every heartbeat and
 	// command (optout.Load). Nil means nothing is turned off.
 	OptOut func() optout.State
+	// DisableCapability turns a capability off through the root helper
+	// for disable_capability and reports whether the opt-out changed. Nil
+	// reports it unsupported.
+	DisableCapability func(ctx context.Context, name string) (bool, error)
 	// UpdatePoll is how often the helper's result is looked for (5 s).
 	UpdatePoll time.Duration
 	Now        func() time.Time

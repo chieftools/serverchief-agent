@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -105,5 +106,38 @@ func TestValidate(t *testing.T) {
 	err := Validate([]string{"reboot", "update_agent", "shell"})
 	if err == nil || !strings.Contains(err.Error(), `"update_agent", "shell"`) || !strings.Contains(err.Error(), "reboot, upgrade_packages") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDisableOnlyAddsAKnownName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "disabled-capabilities.json")
+
+	if changed, err := Disable(path, -1, Reboot); err != nil || !changed {
+		t.Fatalf("first: changed %v, %v", changed, err)
+	}
+	if changed, err := Disable(path, -1, UpgradePackages); err != nil || !changed {
+		t.Fatalf("second: changed %v, %v", changed, err)
+	}
+	if changed, err := Disable(path, -1, Reboot); err != nil || changed {
+		t.Fatalf("again: changed %v, %v", changed, err)
+	}
+	if state := Load(path, -1); state.Err != nil || !slices.Equal(state.Disabled, []string{Reboot, UpgradePackages}) {
+		t.Fatalf("state = %+v", state)
+	}
+	if _, err := Disable(path, -1, "update_agent"); err == nil {
+		t.Fatal("disabled an unknown capability")
+	}
+}
+
+func TestDisableLeavesAnUntrustedFileAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "disabled-capabilities.json")
+	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := Disable(path, -1, Reboot); err != nil || changed {
+		t.Fatalf("changed %v, %v", changed, err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "not json" {
+		t.Fatalf("file = %q", data)
 	}
 }
