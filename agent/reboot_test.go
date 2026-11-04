@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -525,5 +526,21 @@ func TestRebootIfRequiredMustBeABoolean(t *testing.T) {
 	setup.command(t, daemon, "r1", `{"if_required":"yes"}`)
 	if results := setup.server.resultsOf("r1"); len(results) != 1 || !strings.HasPrefix(*results[0].Detail, "invalid args:") || setup.reboots.count() != 0 {
 		t.Fatalf("results = %+v", results)
+	}
+}
+
+func TestRebootSendsAHeartbeatOnceItIsScheduled(t *testing.T) {
+	setup := newRebootSetup(t)
+	daemon := setup.start(t)
+	tick(t, daemon)
+
+	before := len(setup.server.requestLog())
+	setup.command(t, daemon, "r1", `{}`)
+	if at := daemon.wakeAt(); at.After(setup.clock.Now()) {
+		t.Fatalf("next heartbeat at %v", at)
+	}
+	tick(t, daemon)
+	if got := requestsSince(setup.server, before); !slices.Contains(got, "/heartbeat") {
+		t.Fatalf("requests = %q", got)
 	}
 }

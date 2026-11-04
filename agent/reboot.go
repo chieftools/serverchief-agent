@@ -280,6 +280,9 @@ func (daemon *daemon) rebootNow(record commandRecord) {
 	}
 	log.Printf("[commands] %s %s: the server reboots in one minute", record.Kind, record.ID)
 	daemon.reboot.verifyAt = request.RequestedAt.Add(rebootVerifyAfter)
+	// Heartbeat right away: the backend measures from this contact whether
+	// the server came back in time (protocol: Reboots).
+	daemon.heartbeatAt = daemon.options.Now()
 }
 
 // tickReboot retries a reboot waiting for the package manager and checks
