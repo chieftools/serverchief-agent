@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/crypto/x509roots/fallback v0.0.0-20261027005312-1da6254a58cf
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20261103070834-3d426ad4de97
 )
 
 require (
