@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.chief.tools/serverchief-agent/optout"
 	"go.chief.tools/serverchief-agent/updater"
@@ -22,6 +25,17 @@ const (
 	upgradeLockRetry = 30 * time.Second
 	// upgradeLaunchTimeout bounds starting the detached helper.
 	upgradeLaunchTimeout = 2 * time.Minute
+	// upgradeStreamCheck is how often the live output of a running upgrade
+	// is checked for new bytes. They go out in one request at a time:
+	// output that arrives while a chunk is on its way goes in the next one,
+	// so the chunks follow the output's own pace, and nothing is sent while
+	// the upgrade prints nothing.
+	upgradeStreamCheck = 250 * time.Millisecond
+	// upgradeStreamRetry is the least wait after a chunk failed.
+	upgradeStreamRetry = 2 * time.Second
+	// upgradeFlushChunks bounds sending the rest of the output before the
+	// result, which carries the output anyway.
+	upgradeFlushChunks = 32
 )
 
 // upgradeWork is the daemon's side of a package upgrade: a command waiting
@@ -39,6 +53,19 @@ type upgradeWork struct {
 	// resumeDue checks once after the start that a pending request has a
 	// helper.
 	resumeDue bool
+	// stream is the live output of the handed-off upgrade.
+	stream outputStream
+}
+
+// outputStream is how far the live output of an upgrade was sent.
+type outputStream struct {
+	commandID string
+	offset    int64
+	at        time.Time
+	backoff   time.Duration
+	// stopped is set once the backend rejected a chunk other than with
+	// an offset to continue from.
+	stopped bool
 }
 
 // upgradeArgs are the arguments of upgrade_packages. Unknown arguments are
@@ -232,6 +259,7 @@ func (daemon *daemon) tickUpgrade(ctx context.Context, now time.Time) {
 			daemon.upgradeNow(record, request)
 		}
 	}
+	daemon.streamUpgrade(ctx, now)
 	daemon.pollUpgrade(ctx, now)
 }
 
@@ -245,7 +273,157 @@ func (daemon *daemon) upgradeWakeAt() time.Time {
 	if work.active && daemon.options.Upgrades != nil && (at.IsZero() || work.pollAt.Before(at)) {
 		at = work.pollAt
 	}
+	if work.active && daemon.options.Upgrades != nil && !work.stream.stopped && (at.IsZero() || work.stream.at.Before(at)) {
+		at = work.stream.at
+	}
 	return at
+}
+
+// streamUpgrade sends what the running upgrade printed since the last
+// chunk, as soon as there is new output and the previous chunk is done,
+// and the next chunk right away while more is waiting (protocol: Live
+// output).
+func (daemon *daemon) streamUpgrade(ctx context.Context, now time.Time) {
+	work := &daemon.upgrade
+	if daemon.options.Upgrades == nil || !work.active || now.Before(work.stream.at) {
+		return
+	}
+	work.stream.at = now.Add(upgradeStreamCheck)
+	if id := daemon.handedOffUpgrade(); id != "" && daemon.selectStream(id) {
+		daemon.sendUpgradeOutput(ctx, false)
+	}
+}
+
+// handedOffUpgrade is the upgrade the helper works on, "" for none.
+func (daemon *daemon) handedOffUpgrade() string {
+	for _, record := range daemon.commands.snapshot() {
+		if record.Kind == CommandUpgradePackages && record.State == commandHandedOff {
+			return record.ID
+		}
+	}
+	return ""
+}
+
+// selectStream points the stream at id, continuing from the persisted
+// position after a restart. It reports whether output is still sent.
+func (daemon *daemon) selectStream(id string) bool {
+	stream := &daemon.upgrade.stream
+	if stream.commandID != id {
+		*stream = outputStream{commandID: id, at: stream.at, backoff: initialBackoff}
+		if position, err := daemon.options.Upgrades.Files.ReadStream(); err != nil {
+			log.Printf("[upgrade] %v; sending the output from its start", err)
+		} else if position != nil && position.CommandID == id && position.Offset > 0 {
+			stream.offset = position.Offset
+		}
+	}
+	return !stream.stopped
+}
+
+// sendUpgradeOutput sends the next chunk of the live output. complete
+// says the helper is done, so an incomplete character at the end is sent
+// (replaced) instead of waiting for the rest. It reports whether the
+// backend took a chunk, or asked to continue elsewhere, so there may be
+// more to send.
+func (daemon *daemon) sendUpgradeOutput(ctx context.Context, complete bool) bool {
+	stream := &daemon.upgrade.stream
+	data, size, found, err := daemon.options.Upgrades.Files.ReadOutput(stream.offset, MaximumOutputChunk)
+	if err != nil {
+		log.Printf("[upgrade] read the output of %s: %v", stream.commandID, err)
+		return false
+	}
+	if !found || len(data) == 0 {
+		return false
+	}
+	chunk, ok := outputChunk(stream.offset, data, complete || stream.offset+int64(len(data)) < size)
+	if !ok {
+		return false
+	}
+	err = daemon.options.Client.ReportCommandOutput(ctx, stream.commandID, chunk)
+	if err == nil {
+		stream.offset += chunk.Length
+		stream.backoff = initialBackoff
+		if stream.offset < size {
+			// More is waiting: send it as soon as the loop comes around.
+			stream.at = daemon.options.Now()
+		}
+		daemon.persistStream()
+		return true
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	kind, problem := classify(err)
+	if problem != nil && problem.Status == http.StatusConflict && problem.ExpectedOffset != nil {
+		log.Printf("[upgrade] the backend has %d bytes of the output of %s; continuing from there", *problem.ExpectedOffset, stream.commandID)
+		stream.offset = *problem.ExpectedOffset
+		daemon.persistStream()
+		return true
+	}
+	wait, _ := daemon.failure("send the output of "+stream.commandID, err, &stream.backoff, upgradeStreamRetry)
+	if kind == failureRejected {
+		// The panel does not take live output for this command; the
+		// result still carries it.
+		stream.stopped = true
+		return false
+	}
+	stream.at = daemon.options.Now().Add(wait)
+	return false
+}
+
+// flushUpgradeOutput sends what is left of the live output before the
+// result is reported.
+func (daemon *daemon) flushUpgradeOutput(ctx context.Context, id string) {
+	if !daemon.selectStream(id) {
+		return
+	}
+	for range upgradeFlushChunks {
+		if !daemon.sendUpgradeOutput(ctx, true) {
+			return
+		}
+	}
+}
+
+func (daemon *daemon) persistStream() {
+	stream := daemon.upgrade.stream
+	if err := daemon.options.Upgrades.Files.WriteStream(upgrader.StreamPosition{CommandID: stream.commandID, Offset: stream.offset}); err != nil {
+		log.Printf("[upgrade] %v", err)
+	}
+}
+
+// outputChunk turns raw output bytes from offset into a chunk: it ends at
+// a character boundary unless complete (an incomplete character waits for
+// its remaining bytes), replaces invalid bytes and keeps the text within
+// MaximumOutputChunk. ok is false when there is nothing to send yet.
+func outputChunk(offset int64, data []byte, complete bool) (CommandOutputChunk, bool) {
+	end := len(data)
+	if !complete {
+		end = completeRunes(data)
+	}
+	for end > 0 {
+		text := strings.ToValidUTF8(string(data[:end]), "\uFFFD")
+		if len(text) <= MaximumOutputChunk {
+			return CommandOutputChunk{Offset: offset, Length: int64(end), Output: text}, true
+		}
+		// Replacement characters take three bytes for one; send less.
+		end = completeRunes(data[:end/2])
+	}
+	return CommandOutputChunk{}, false
+}
+
+// completeRunes is the length of data without an incomplete UTF-8
+// character at its end. Invalid bytes count as complete: they are
+// replaced, never completed.
+func completeRunes(data []byte) int {
+	for back := 1; back <= utf8.UTFMax && back <= len(data); back++ {
+		start := len(data) - back
+		if utf8.RuneStart(data[start]) {
+			if !utf8.FullRune(data[start:]) {
+				return start
+			}
+			return len(data)
+		}
+	}
+	return len(data)
 }
 
 // pollUpgrade reports the helper's result, reports handed-off commands
@@ -270,7 +448,7 @@ func (daemon *daemon) pollUpgrade(ctx context.Context, now time.Time) {
 	// The helper writes the result before it removes the request, so
 	// reading in this order never sees neither for a live upgrade.
 	request, requestErr := controller.PendingRequest()
-	result, output, resultErr := controller.ReadResult()
+	result, output, truncated, resultErr := controller.ReadResult()
 	if requestErr != nil {
 		log.Printf("[upgrade] %v", requestErr)
 	}
@@ -278,7 +456,8 @@ func (daemon *daemon) pollUpgrade(ctx context.Context, now time.Time) {
 		log.Printf("[upgrade] %v", resultErr)
 	}
 	if result != nil {
-		daemon.finishUpgrade(*result, output)
+		daemon.flushUpgradeOutput(ctx, result.CommandID)
+		daemon.finishUpgrade(*result, output, truncated)
 	}
 
 	handedOff := 0
@@ -302,7 +481,7 @@ func (daemon *daemon) pollUpgrade(ctx context.Context, now time.Time) {
 
 // finishUpgrade turns the helper's result into the command's result,
 // removes the helper's files and collects packages and updates now.
-func (daemon *daemon) finishUpgrade(result upgrader.Result, output string) {
+func (daemon *daemon) finishUpgrade(result upgrader.Result, output string, truncated bool) {
 	record := daemon.commands.get(result.CommandID)
 	switch {
 	case record == nil:
@@ -322,7 +501,7 @@ func (daemon *daemon) finishUpgrade(result upgrader.Result, output string) {
 	if result.Status == CommandSucceeded {
 		status = CommandSucceeded
 	}
-	daemon.finishCommandOutput(result.CommandID, status, result.Detail, data, output, false)
+	daemon.finishCommandOutput(result.CommandID, status, result.Detail, data, output, truncated)
 	if err := daemon.options.Upgrades.RemoveResult(); err != nil {
 		log.Printf("[upgrade] %v", err)
 	}

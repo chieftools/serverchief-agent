@@ -9,9 +9,11 @@ package upgrader
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"time"
 
+	"go.chief.tools/serverchief-agent/execlog"
 	"go.chief.tools/serverchief-agent/updater"
 )
 
@@ -23,15 +25,20 @@ const (
 	StateFile = "upgrade-state.json"
 	// ResultFile is the helper's outcome, reported by the daemon.
 	ResultFile = "upgrade-result.json"
-	// OutputFile is the helper's execution log, kept with its progress.
+	// OutputFile is the helper's execution log. The helper appends to it
+	// as it runs, so the daemon streams it (protocol: Live output), and
+	// the result carries its end.
 	OutputFile = "upgrade-output.log"
+	// StreamFile is how much of OutputFile the daemon has sent, so a
+	// restarted daemon continues instead of sending it again.
+	StreamFile = "upgrade-stream.json"
 	// LockFile is locked by the running helper for its whole lifetime.
 	LockFile = "upgrade.lock"
 )
 
-// maximumOutputFileBytes caps the output file; execlog keeps at most
-// 1 MiB of output, and the file is never larger.
-const maximumOutputFileBytes = 2 << 20
+// outputTailBytes is how much of the end of the output file the result
+// and a resumed helper read; execlog keeps at most half of it.
+const outputTailBytes = 2 * execlog.MaxBytes
 
 // Scopes of upgrade_packages.
 const (
@@ -196,29 +203,60 @@ func (files Files) WriteRequest(request Request) error {
 // RemoveRequest deletes the request.
 func (files Files) RemoveRequest() error { return files.Store.Remove(RequestFile) }
 
-// ReadResult returns the helper's result and output, or nil.
-func (files Files) ReadResult() (*Result, string, error) {
+// ReadResult returns the helper's result with the end of its output, at
+// most execlog.MaxBytes, and whether the output's beginning was cut off;
+// nil without a result.
+func (files Files) ReadResult() (*Result, string, bool, error) {
 	var result Result
 	found, err := files.Store.ReadJSON(ResultFile, &result)
 	if err != nil || !found {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	if !updater.ValidCommandID(result.CommandID) || result.Data.Code == "" {
-		return nil, "", errors.New("upgrade result: invalid command id or code")
+		return nil, "", false, errors.New("upgrade result: invalid command id or code")
 	}
-	output, _, err := files.Store.ReadText(OutputFile, maximumOutputFileBytes)
+	output, truncated, err := files.readOutputTail()
 	if err != nil {
-		output = "(the output could not be read: " + err.Error() + ")\n"
+		output, truncated = "(the output could not be read: "+err.Error()+")\n", false
 	}
-	return &result, output, nil
+	return &result, output, truncated, nil
 }
 
-// RemoveResult deletes the result and its output.
-func (files Files) RemoveResult() error {
-	if err := files.Store.Remove(ResultFile); err != nil {
-		return err
+// ReadOutput returns at most limit bytes of the output file from offset,
+// and the file's size; found is false when there is no output file.
+func (files Files) ReadOutput(offset int64, limit int) ([]byte, int64, bool, error) {
+	return files.Store.ReadRange(OutputFile, offset, limit)
+}
+
+// StreamPosition is how much of a command's output the daemon has sent.
+type StreamPosition struct {
+	CommandID string `json:"command_id"`
+	Offset    int64  `json:"offset"`
+}
+
+// ReadStream returns the persisted stream position, or nil.
+func (files Files) ReadStream() (*StreamPosition, error) {
+	var position StreamPosition
+	found, err := files.Store.ReadJSON(StreamFile, &position)
+	if err != nil || !found {
+		return nil, err
 	}
-	return files.Store.Remove(OutputFile)
+	return &position, nil
+}
+
+// WriteStream persists the stream position.
+func (files Files) WriteStream(position StreamPosition) error {
+	return files.Store.WriteJSON(StreamFile, position)
+}
+
+// RemoveResult deletes the result, its output and the stream position.
+func (files Files) RemoveResult() error {
+	for _, name := range []string{ResultFile, OutputFile, StreamFile} {
+		if err := files.Store.Remove(name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (files Files) readState() (*state, error) {
@@ -232,12 +270,27 @@ func (files Files) readState() (*state, error) {
 
 func (files Files) writeState(current state) error { return files.Store.WriteJSON(StateFile, current) }
 
-func (files Files) readOutput() string {
-	output, _, _ := files.Store.ReadText(OutputFile, maximumOutputFileBytes)
-	return output
+// readOutputTail returns the end of the output file as execlog would keep
+// it, and whether its beginning was cut off. A missing file is no output.
+func (files Files) readOutputTail() (string, bool, error) {
+	data, size, found, err := files.Store.ReadRange(OutputFile, 0, 0)
+	if err != nil || !found {
+		return "", false, err
+	}
+	start := max(size-outputTailBytes, 0)
+	data, _, _, err = files.Store.ReadRange(OutputFile, start, outputTailBytes)
+	if err != nil {
+		return "", false, err
+	}
+	text, truncated := execlog.Cap(string(data))
+	return text, truncated || start > 0, nil
 }
 
-func (files Files) writeOutput(output string) error { return files.Store.WriteText(OutputFile, output) }
+// openOutput opens the output file for appending; fresh empties it for a
+// new request.
+func (files Files) openOutput(fresh bool) (*os.File, error) {
+	return files.Store.OpenAppend(OutputFile, fresh)
+}
 
 func (files Files) writeResult(result Result) error { return files.Store.WriteJSON(ResultFile, result) }
 

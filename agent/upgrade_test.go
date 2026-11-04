@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -446,5 +447,192 @@ func TestAgentUpdatePollLeavesTheNestedResultToTheUpgrade(t *testing.T) {
 	}
 	if result, _ := updates.controller.ReadResult(); result == nil {
 		t.Fatal("nested result removed by the daemon")
+	}
+}
+
+// appendOutput plays the helper writing its live output.
+func (fake *fakeUpgrades) appendOutput(t *testing.T, data string) {
+	t.Helper()
+	file, err := fake.store().OpenAppend(upgrader.OutputFile, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.WriteString(data); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// handOffUpgrade starts u1 and returns the daemon with it handed off.
+func handOffUpgrade(t *testing.T, setup *upgradeSetup) *daemon {
+	t.Helper()
+	daemon := setup.start(t)
+	tick(t, daemon)
+	setup.command(t, daemon, "u1", securityArgs)
+	if record := daemon.commands.get("u1"); record == nil || record.State != commandHandedOff {
+		t.Fatalf("record = %+v", record)
+	}
+	return daemon
+}
+
+func TestCommandOutputFixtureRoundTrips(t *testing.T) {
+	fixture := readFixture(t, "command-output-request.json")
+	var chunk CommandOutputChunk
+	if err := json.Unmarshal(fixture, &chunk); err != nil {
+		t.Fatal(err)
+	}
+	if chunk.Offset != 1843 || chunk.Length != int64(len(chunk.Output)) || !strings.HasPrefix(chunk.Output, "# Installing 3 security updates\n") {
+		t.Fatalf("chunk = %+v", chunk)
+	}
+	if encoded, _ := json.Marshal(chunk); !sameJSON(t, encoded, fixture) {
+		t.Fatalf("CommandOutputChunk does not round-trip the fixture:\n%s", encoded)
+	}
+}
+
+func TestOutputChunksEndAtCharacterBoundaries(t *testing.T) {
+	for name, test := range map[string]struct {
+		data     string
+		complete bool
+		length   int64
+		output   string
+		ok       bool
+	}{
+		"plain":                    {"abc", false, 3, "abc", true},
+		"incomplete character":     {"abc\xc3", false, 3, "abc", true},
+		"only an incomplete start": {"\xe2\x82", false, 0, "", false},
+		"complete at the end":      {"abc\xc3", true, 4, "abc�", true},
+		"invalid byte":             {"a\xffb", false, 3, "a�b", true},
+		"multibyte":                {"é€", false, 5, "é€", true},
+	} {
+		chunk, ok := outputChunk(10, []byte(test.data), test.complete)
+		if ok != test.ok || ok && (chunk.Offset != 10 || chunk.Length != test.length || chunk.Output != test.output) {
+			t.Errorf("%s: chunk = %+v, ok %v", name, chunk, ok)
+		}
+	}
+	// A replacement character takes three bytes for each invalid byte
+	// between valid ones: the text stays within the cap by sending fewer
+	// raw bytes.
+	invalid := []byte(strings.Repeat("\xffa", MaximumOutputChunk/2))
+	chunk, ok := outputChunk(0, invalid, false)
+	if !ok || len(chunk.Output) > MaximumOutputChunk || chunk.Length == 0 || chunk.Length >= int64(len(invalid)) {
+		t.Fatalf("length %d, text %d bytes", chunk.Length, len(chunk.Output))
+	}
+}
+
+func TestUpgradeOutputIsStreamedWhileItRuns(t *testing.T) {
+	setup := newUpgradeSetup(t)
+	daemon := handOffUpgrade(t, setup)
+
+	setup.upgrades.appendOutput(t, "# Refreshing the package lists\n$ apt-get update -qq\ncaf\xc3")
+	setup.clock.advance(upgradeStreamCheck)
+	tick(t, daemon)
+	chunks := setup.server.outputOf("u1")
+	if len(chunks) != 1 || chunks[0].Offset != 0 || chunks[0].Output != "# Refreshing the package lists\n$ apt-get update -qq\ncaf" || chunks[0].Length != int64(len(chunks[0].Output)) {
+		t.Fatalf("chunks = %+v", chunks)
+	}
+
+	// Nothing new, nothing sent.
+	for range 4 {
+		setup.clock.advance(upgradeStreamCheck)
+		tick(t, daemon)
+	}
+	if chunks := setup.server.outputOf("u1"); len(chunks) != 1 {
+		t.Fatalf("sent without new output: %+v", chunks)
+	}
+
+	// New output goes out on the next check, not seconds later; the rest
+	// of an incomplete character completes it.
+	setup.upgrades.appendOutput(t, "\xa9\n")
+	if at := daemon.wakeAt(); at.After(setup.clock.Now().Add(upgradeStreamCheck)) {
+		t.Fatalf("wakes at %v", at)
+	}
+	setup.clock.advance(upgradeStreamCheck)
+	tick(t, daemon)
+	chunks = setup.server.outputOf("u1")
+	if len(chunks) != 2 || chunks[1].Offset != chunks[0].Length || chunks[1].Output != "é\n" || chunks[1].Length != 3 {
+		t.Fatalf("chunks = %+v", chunks)
+	}
+
+	// A backlog goes in chunks of at most 64 KiB, one after the other
+	// without waiting for the next check.
+	setup.upgrades.appendOutput(t, strings.Repeat("x", MaximumOutputChunk+10))
+	setup.clock.advance(upgradeStreamCheck)
+	tick(t, daemon)
+	chunks = setup.server.outputOf("u1")
+	if len(chunks) != 3 || chunks[2].Length != MaximumOutputChunk {
+		t.Fatalf("third chunk length = %d", chunks[len(chunks)-1].Length)
+	}
+	if at := daemon.wakeAt(); at.After(setup.clock.Now()) {
+		t.Fatalf("the rest waits until %v", at)
+	}
+	tick(t, daemon)
+	if chunks = setup.server.outputOf("u1"); len(chunks) != 4 || chunks[3].Length != 10 {
+		t.Fatalf("chunks = %d, last %+v", len(chunks), chunks[len(chunks)-1])
+	}
+}
+
+func TestUpgradeOutputFollowsTheBackendsOffset(t *testing.T) {
+	setup := newUpgradeSetup(t)
+	daemon := handOffUpgrade(t, setup)
+	setup.upgrades.appendOutput(t, "0123456789")
+	setup.server.fail("/commands/u1/output", failure{status: 409, body: `{"type":"offset_mismatch","status":409,"title":"Offset mismatch","expected_offset":4}`})
+	setup.clock.advance(upgradeStreamCheck)
+	tick(t, daemon)
+	setup.clock.advance(upgradeStreamCheck)
+	tick(t, daemon)
+	if chunks := setup.server.outputOf("u1"); len(chunks) != 1 || chunks[0].Offset != 4 || chunks[0].Output != "456789" {
+		t.Fatalf("chunks = %+v", chunks)
+	}
+
+	// A restarted daemon continues where the backend is.
+	setup.upgrades.appendOutput(t, "abc")
+	restarted := setup.start(t)
+	tick(t, restarted)
+	setup.clock.advance(upgradeStreamCheck)
+	tick(t, restarted)
+	if chunks := setup.server.outputOf("u1"); len(chunks) != 2 || chunks[1].Offset != 10 || chunks[1].Output != "abc" {
+		t.Fatalf("after a restart chunks = %+v", chunks)
+	}
+}
+
+func TestUpgradeOutputStopsWhenTheBackendRejectsIt(t *testing.T) {
+	setup := newUpgradeSetup(t)
+	daemon := handOffUpgrade(t, setup)
+	setup.upgrades.appendOutput(t, "first\n")
+	setup.server.fail("/commands/u1/output", failure{status: 404, body: `{"type":"not_found","status":404,"title":"Not found"}`})
+	setup.clock.advance(upgradeStreamCheck)
+	tick(t, daemon)
+	before := len(setup.server.requestLog())
+	setup.upgrades.appendOutput(t, "second\n")
+	for range 3 {
+		setup.clock.advance(upgradeStreamCheck)
+		tick(t, daemon)
+	}
+	if got := requestsSince(setup.server, before); slices.Contains(got, "/commands/u1/output") {
+		t.Fatalf("streamed after a rejection: %q", got)
+	}
+}
+
+func TestUpgradeOutputIsFlushedBeforeTheResult(t *testing.T) {
+	setup := newUpgradeSetup(t)
+	daemon := handOffUpgrade(t, setup)
+	before := len(setup.server.requestLog())
+	// The helper finished between two intervals, its output ending in an
+	// incomplete character that never completes.
+	setup.upgrades.finish(t, upgrader.Result{CommandID: "u1", Status: upgrader.StatusSucceeded, FinishedAt: setup.clock.Now(), Data: upgrader.Data{Code: upgrader.CodeNothingToUpgrade, Scope: "security"}},
+		strings.Repeat("y", MaximumOutputChunk+5)+"\xc3")
+	setup.clock.advance(time.Second)
+	tick(t, daemon)
+
+	got := requestsSince(setup.server, before)
+	if want := []string{"/commands/u1/output", "/commands/u1/output", "/commands/u1/result"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("requests = %q", got)
+	}
+	chunks := setup.server.outputOf("u1")
+	if last := chunks[len(chunks)-1]; !strings.HasSuffix(last.Output, "�") || last.Offset+last.Length != int64(MaximumOutputChunk+6) {
+		t.Fatalf("last chunk = offset %d, length %d", last.Offset, last.Length)
+	}
+	if setup.upgrades.exists(upgrader.StreamFile) {
+		t.Fatal("stream position kept")
 	}
 }

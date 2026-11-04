@@ -86,8 +86,9 @@ func (controller *Controller) Resume(ctx context.Context) (bool, error) {
 	return true, controller.Launch(ctx)
 }
 
-// ReadResult returns the helper's result and output, or nil.
-func (controller *Controller) ReadResult() (*Result, string, error) {
+// ReadResult returns the helper's result, the end of its output and
+// whether that was cut off, or nil.
+func (controller *Controller) ReadResult() (*Result, string, bool, error) {
 	return controller.Files.ReadResult()
 }
 

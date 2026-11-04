@@ -374,6 +374,18 @@ type CommandResult struct {
 	OutputTruncated *bool   `json:"output_truncated,omitempty"`
 }
 
+// CommandOutputChunk is the body of POST /commands/{id}/output
+// (fixtures/command-output-request.json): bytes Offset to Offset+Length of
+// a running command's raw output, as UTF-8 with invalid bytes replaced.
+type CommandOutputChunk struct {
+	Offset int64  `json:"offset"`
+	Length int64  `json:"length"`
+	Output string `json:"output"`
+}
+
+// MaximumOutputChunk caps a chunk's Output in bytes.
+const MaximumOutputChunk = 64 << 10
+
 // RebootData is the data of a reboot result
 // (fixtures/reboot-result-request.json).
 type RebootData struct {

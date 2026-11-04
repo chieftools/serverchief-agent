@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os/exec"
 	"strings"
 	"sync"
@@ -23,6 +24,18 @@ type Log struct {
 	mu        sync.Mutex
 	buffer    []byte
 	truncated bool
+	// sink receives every byte added after SetSink, in order, such as
+	// the live output file the daemon streams from.
+	sink io.Writer
+}
+
+// SetSink makes every later addition also go to sink, as it is added.
+// Output added before stays in the log only. A failing sink is not an
+// error of the log.
+func (log *Log) SetSink(sink io.Writer) {
+	log.mu.Lock()
+	defer log.mu.Unlock()
+	log.sink = sink
 }
 
 // Command starts the output of a program with its argv.
@@ -35,7 +48,7 @@ func (log *Log) Command(argv []string) {
 	log.mu.Lock()
 	defer log.mu.Unlock()
 	if len(log.buffer) > 0 && log.buffer[len(log.buffer)-1] != '\n' {
-		log.buffer = append(log.buffer, '\n')
+		line = "\n" + line
 	}
 	log.appendLocked([]byte(line))
 }
@@ -51,6 +64,9 @@ func (log *Log) Write(data []byte) (int, error) {
 // appendLocked keeps at most twice MaxBytes in memory; Text trims to the
 // final size at a character boundary.
 func (log *Log) appendLocked(data []byte) {
+	if log.sink != nil && len(data) > 0 {
+		_, _ = log.sink.Write(data)
+	}
 	log.buffer = append(log.buffer, data...)
 	if excess := len(log.buffer) - 2*MaxBytes; excess > 0 {
 		log.buffer = append(log.buffer[:0], log.buffer[excess:]...)

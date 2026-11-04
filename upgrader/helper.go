@@ -101,6 +101,9 @@ type helper struct {
 	request Request
 	state   state
 	output  execlog.Log
+	// live is set while the output goes to OutputFile as it is written;
+	// without it the output is saved whole with the state.
+	live bool
 }
 
 // RunHelper carries out the pending request, resuming from the persisted
@@ -119,7 +122,7 @@ func RunHelper(ctx context.Context, options Options) error {
 		log.Printf("[upgrade] no pending upgrade request")
 		return nil
 	}
-	if result, _, err := files.ReadResult(); err == nil && result != nil && result.CommandID == request.CommandID {
+	if result, _, _, err := files.ReadResult(); err == nil && result != nil && result.CommandID == request.CommandID {
 		log.Printf("[upgrade] %s already finished with %s; cleaning up", request.CommandID, result.Data.Code)
 		return files.cleanup()
 	}
@@ -129,13 +132,25 @@ func RunHelper(ctx context.Context, options Options) error {
 	if err != nil {
 		log.Printf("[upgrade] %v; starting over", err)
 	}
-	if current != nil && current.CommandID == request.CommandID {
+	resuming := current != nil && current.CommandID == request.CommandID
+	if resuming {
 		run.state = *current
-		_, _ = run.output.Write([]byte(files.readOutput()))
+		if previous, _, err := files.readOutputTail(); err == nil {
+			_, _ = run.output.Write([]byte(previous))
+		}
 		log.Printf("[upgrade] resuming %s (%s) in phase %s", request.CommandID, request.Scope, current.Phase)
 	} else {
 		run.state = state{CommandID: request.CommandID, Phase: phaseWaiting, WaitStartedAt: options.Now().UTC()}
 		log.Printf("[upgrade] starting %s: %s updates, restart services %t, agent %q", request.CommandID, request.Scope, request.RestartServices, request.AgentVersion)
+	}
+	// From here on the output goes to OutputFile as it is written, which
+	// the daemon streams; a new request starts it empty.
+	if file, err := files.openOutput(!resuming); err != nil {
+		log.Printf("[upgrade] the output cannot be streamed: %v", err)
+	} else {
+		defer file.Close()
+		run.output.SetSink(file)
+		run.live = true
 	}
 	run.state.Starts++
 	if err := run.save(); err != nil {
@@ -152,8 +167,7 @@ func RunHelper(ctx context.Context, options Options) error {
 
 func (run *helper) save() error {
 	run.state.UpdatedAt = run.options.Now().UTC()
-	text, _ := run.output.Text()
-	if err := run.options.Files.writeOutput(text); err != nil {
+	if err := run.saveOutput(); err != nil {
 		return fmt.Errorf("save the upgrade output: %w", err)
 	}
 	if err := run.options.Files.writeState(run.state); err != nil {
@@ -166,6 +180,21 @@ func (run *helper) enter(phase string) error {
 	log.Printf("[upgrade] %s: %s → %s", run.request.CommandID, run.state.Phase, phase)
 	run.state.Phase = phase
 	return run.save()
+}
+
+// saveOutput writes the whole output when it does not go to OutputFile as
+// it is written.
+func (run *helper) saveOutput() error {
+	if run.live {
+		return nil
+	}
+	text, _ := run.output.Text()
+	return run.options.Files.Store.WriteText(OutputFile, text)
+}
+
+// step marks the start of a step in the output, for whoever follows it.
+func (run *helper) step(message string) {
+	_, _ = run.output.Write([]byte("# " + message + "\n"))
 }
 
 func (run *helper) note(message string) {
@@ -183,8 +212,10 @@ func (run *helper) command(ctx context.Context, env, argv []string, timeout time
 	run.output.Command(append(slices.Clone(env), argv...))
 	commandContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
-	output, err := run.options.Run(commandContext, env, argv)
-	_, _ = run.output.Write(output.Text)
+	output, err := run.options.Run(commandContext, env, argv, &run.output)
+	if !output.Streamed {
+		_, _ = run.output.Write(output.Text)
+	}
 	if err != nil {
 		_, _ = run.output.Write([]byte(err.Error() + "\n"))
 	} else if output.ExitCode != 0 {
@@ -287,6 +318,7 @@ func (run *helper) refresh(ctx context.Context) string {
 	if run.apt() {
 		env = AptEnvironment(false)
 	}
+	run.step("Refreshing the package lists")
 	output, err := run.command(ctx, env, argv, refreshTimeout)
 	switch {
 	case err != nil:
@@ -376,6 +408,7 @@ func (run *helper) upgrade(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", run.finish(CodeUpgradeFailed, err.Error())
 	}
+	run.step(installStep(len(keys), run.request.Scope))
 	output, err := run.command(ctx, env, argv, installTimeout)
 	run.state.Ran, run.state.ExitCode = true, output.ExitCode
 	if err != nil {
@@ -410,6 +443,7 @@ func (run *helper) restartServices(ctx context.Context) string {
 		run.note("needs-restarting (yum-utils or dnf-utils) is not installed, so no services were restarted")
 		return phaseFinishing
 	}
+	run.step("Restarting services")
 	output, err := run.command(ctx, nil, NeedsRestartingServices(tool), serviceTimeout)
 	if err != nil || output.ExitCode != 0 {
 		run.note("needs-restarting -s failed, so no services were restarted")
@@ -499,8 +533,7 @@ func (run *helper) write(data Data, detail string) error {
 		Data:       data,
 		FinishedAt: run.options.Now().UTC().Truncate(time.Second),
 	}
-	text, _ := run.output.Text()
-	if err := run.options.Files.writeOutput(text); err != nil {
+	if err := run.saveOutput(); err != nil {
 		return fmt.Errorf("write the upgrade output: %w", err)
 	}
 	if err := run.options.Files.writeResult(result); err != nil {
@@ -508,6 +541,19 @@ func (run *helper) write(data Data, detail string) error {
 	}
 	log.Printf("[upgrade] %s finished: %s %s", run.request.CommandID, status, data.Code)
 	return run.options.Files.cleanup()
+}
+
+// installStep is the step line before the install: how many updates of
+// the scope it installs.
+func installStep(count int, scope string) string {
+	noun := "updates"
+	if count == 1 {
+		noun = "update"
+	}
+	if scope == ScopeSecurity {
+		return fmt.Sprintf("Installing %d security %s", count, noun)
+	}
+	return fmt.Sprintf("Installing %d %s", count, noun)
 }
 
 // needrestartServices reads the services needrestart restarted from its

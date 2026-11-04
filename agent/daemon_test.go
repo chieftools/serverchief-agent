@@ -92,6 +92,7 @@ type protocolServer struct {
 	commands       []Command
 	commandStates  map[string]string // pending, delivered, acknowledged, succeeded, failed
 	commandResults map[string][]CommandResult
+	commandOutput  map[string][]CommandOutputChunk
 	requests       []string // every request path, in order
 
 	events chan string
@@ -116,6 +117,12 @@ func (server *protocolServer) resultsOf(id string) []CommandResult {
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	return append([]CommandResult(nil), server.commandResults[id]...)
+}
+
+func (server *protocolServer) outputOf(id string) []CommandOutputChunk {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	return append([]CommandOutputChunk(nil), server.commandOutput[id]...)
 }
 
 func (server *protocolServer) requestLog() []string {
@@ -153,6 +160,13 @@ func (server *protocolServer) handleCommands(writer http.ResponseWriter, request
 		if state == "pending" || state == "delivered" {
 			server.commandStates[id] = "acknowledged"
 		}
+	case "output":
+		var chunk CommandOutputChunk
+		if err := json.Unmarshal(body, &chunk); err != nil {
+			writeJSONResponse(writer, 422, `{"type":"validation_failed","status":422,"title":"bad"}`)
+			return
+		}
+		server.commandOutput[id] = append(server.commandOutput[id], chunk)
 	case "result":
 		var result CommandResult
 		if err := json.Unmarshal(body, &result); err != nil {
@@ -189,6 +203,7 @@ func newProtocolServer(t *testing.T) *protocolServer {
 
 		commandStates:  map[string]string{},
 		commandResults: map[string][]CommandResult{},
+		commandOutput:  map[string][]CommandOutputChunk{},
 	}
 	server.config.ETag = `"c1"`
 	server.server = httptest.NewServer(http.HandlerFunc(server.handle))

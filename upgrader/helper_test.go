@@ -2,6 +2,7 @@ package upgrader
 
 import (
 	"context"
+	"io"
 	"os"
 	"reflect"
 	"slices"
@@ -57,7 +58,7 @@ type fakeRunner struct {
 	packages *fakePackages
 }
 
-func (fake *fakeRunner) run(_ context.Context, env []string, argv []string) (Output, error) {
+func (fake *fakeRunner) run(_ context.Context, env []string, argv []string, _ io.Writer) (Output, error) {
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
 	fake.ran = append(fake.ran, slices.Clone(argv))
@@ -130,7 +131,7 @@ func (setup *helperSetup) run(t *testing.T) (*Result, string) {
 	if err := RunHelper(context.Background(), setup.options); err != nil {
 		t.Fatalf("RunHelper() = %v", err)
 	}
-	result, output, err := setup.files.ReadResult()
+	result, output, _, err := setup.files.ReadResult()
 	if err != nil || result == nil {
 		t.Fatalf("result = %v, %v", result, err)
 	}
@@ -180,6 +181,77 @@ func TestAptUpgradeInstallsTheScopeWithoutServerChiefAndReportsNeedrestart(t *te
 	if !strings.Contains(output, "# agent update ran\n") || strings.Index(output, "# agent update ran") > strings.Index(output, "apt-get install") ||
 		!strings.Contains(output, "$ DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none NEEDRESTART_MODE=a /usr/bin/apt-get install") {
 		t.Fatalf("output = %s", output)
+	}
+}
+
+func TestOutputIsWrittenToTheOutputFileAsItRuns(t *testing.T) {
+	setup := newHelperSetup(t, ManagerApt)
+	setup.packages.before = []collector.Update{update("openssl", "amd64", true), update("libssl3", "amd64", true)}
+	setup.packages.after = nil
+	// A runner that streams like ExecRunner: what the install printed so
+	// far is in the file while it still runs.
+	var duringInstall string
+	setup.options.Run = func(ctx context.Context, env []string, argv []string, live io.Writer) (Output, error) {
+		output, err := setup.runner.run(ctx, env, argv, live)
+		if len(argv) > 1 && argv[1] == "install" {
+			_, _ = live.Write([]byte("Unpacking openssl ...\n"))
+			data, _, _, _ := setup.files.ReadOutput(0, 1<<20)
+			duringInstall = string(data)
+			_, _ = live.Write([]byte("Setting up openssl ...\n"))
+			output.Text = []byte("Unpacking openssl ...\nSetting up openssl ...\n")
+			output.Streamed = true
+		}
+		return output, err
+	}
+	setup.request(t, Request{Scope: ScopeSecurity, RestartServices: false})
+
+	_, output := setup.run(t)
+
+	for _, line := range []string{"# Refreshing the package lists\n$ ", "# Installing 2 security updates\n$ ", "apt-get install", "Unpacking openssl ...\n"} {
+		if !strings.Contains(duringInstall, line) {
+			t.Fatalf("missing %q while installing:\n%s", line, duringInstall)
+		}
+	}
+	if strings.Contains(duringInstall, "Setting up openssl") {
+		t.Fatalf("later output already written:\n%s", duringInstall)
+	}
+	if strings.Count(output, "Unpacking openssl ...") != 1 || !strings.HasSuffix(output, "Setting up openssl ...\n") {
+		t.Fatalf("streamed output repeated or missing:\n%s", output)
+	}
+}
+
+func TestANewRequestStartsWithAnEmptyOutputFile(t *testing.T) {
+	setup := newHelperSetup(t, ManagerApt)
+	setup.packages.before = []collector.Update{update("openssl", "amd64", false)}
+	setup.packages.after = nil
+	if err := setup.files.Store.WriteText(OutputFile, "output of an earlier upgrade\n"); err != nil {
+		t.Fatal(err)
+	}
+	setup.request(t, Request{Scope: ScopeAll, CommandID: "u2"})
+
+	_, output := setup.run(t)
+
+	if strings.Contains(output, "earlier upgrade") || !strings.HasPrefix(output, "$ /usr/bin/dpkg --audit\n") {
+		t.Fatalf("output = %s", output)
+	}
+	if info, err := os.Stat(setup.files.Store.Directory + "/" + OutputFile); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("output file = %v, %v", info, err)
+	}
+}
+
+func TestInstallStepNamesTheUpdates(t *testing.T) {
+	for _, test := range []struct {
+		count int
+		scope string
+		want  string
+	}{
+		{1, ScopeSecurity, "Installing 1 security update"},
+		{3, ScopeSecurity, "Installing 3 security updates"},
+		{12, ScopeAll, "Installing 12 updates"},
+	} {
+		if got := installStep(test.count, test.scope); got != test.want {
+			t.Errorf("installStep(%d, %s) = %q", test.count, test.scope, got)
+		}
 	}
 }
 
@@ -318,7 +390,7 @@ func TestResumeKeepsTheOutputAndThePlan(t *testing.T) {
 		AgentUpdate: &AgentUpdate{Code: updater.CodeUpdated, PreviousVersion: "0.4.0", InstalledVersion: "0.4.1"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := setup.files.writeOutput("$ /usr/bin/apt-get update -qq\nearlier output\n"); err != nil {
+	if err := setup.files.Store.WriteText(OutputFile, "$ /usr/bin/apt-get update -qq\nearlier output\n"); err != nil {
 		t.Fatal(err)
 	}
 

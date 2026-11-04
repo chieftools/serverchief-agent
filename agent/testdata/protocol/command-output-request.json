@@ -1,0 +1,5 @@
+{
+  "length": 325,
+  "offset": 1843,
+  "output": "# Installing 3 security updates\n$ DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none NEEDRESTART_MODE=a /usr/bin/apt-get install -y --only-upgrade -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dpkg::Use-Pty=0 libssl3:amd64 linux-image-generic:amd64 openssl:amd64\nReading package lists...\n"
+}

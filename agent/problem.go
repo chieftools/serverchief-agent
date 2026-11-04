@@ -37,6 +37,9 @@ type ProblemError struct {
 	Errors map[string][]string `json:"errors,omitempty"`
 	// RetryAfter comes from the Retry-After header or the retry_after field.
 	RetryAfter time.Duration `json:"-"`
+	// ExpectedOffset is the expected_offset of a 409 offset_mismatch for
+	// live output, nil without one.
+	ExpectedOffset *int64 `json:"-"`
 }
 
 func (problem *ProblemError) Error() string {
@@ -72,18 +75,22 @@ func decodeProblem(response *http.Response) *ProblemError {
 	problem := &ProblemError{Status: response.StatusCode}
 	body, _ := readLimited(response.Body, 64<<10)
 	var document struct {
-		Type       string              `json:"type"`
-		Title      string              `json:"title"`
-		Status     int                 `json:"status"`
-		Detail     string              `json:"detail"`
-		RetryAfter json.Number         `json:"retry_after"`
-		Errors     map[string][]string `json:"errors"`
+		Type           string              `json:"type"`
+		Title          string              `json:"title"`
+		Status         int                 `json:"status"`
+		Detail         string              `json:"detail"`
+		RetryAfter     json.Number         `json:"retry_after"`
+		Errors         map[string][]string `json:"errors"`
+		ExpectedOffset *int64              `json:"expected_offset"`
 	}
 	if len(body) > 0 && json.Unmarshal(body, &document) == nil {
 		problem.Type = document.Type
 		problem.Title = document.Title
 		problem.Detail = document.Detail
 		problem.Errors = document.Errors
+		if document.ExpectedOffset != nil && *document.ExpectedOffset >= 0 {
+			problem.ExpectedOffset = document.ExpectedOffset
+		}
 		if seconds, err := document.RetryAfter.Float64(); err == nil && seconds > 0 {
 			problem.RetryAfter = time.Duration(seconds * float64(time.Second))
 		}

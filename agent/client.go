@@ -41,6 +41,8 @@ type Client interface {
 	AckCommand(ctx context.Context, id string) error
 	// ReportCommandResult reports how a command ended.
 	ReportCommandResult(ctx context.Context, id string, result CommandResult) error
+	// ReportCommandOutput sends a part of a running command's output.
+	ReportCommandOutput(ctx context.Context, id string, chunk CommandOutputChunk) error
 }
 
 // ConfigResult is the answer to GET /config.
@@ -188,6 +190,13 @@ func (client *HTTPClient) AckCommand(ctx context.Context, id string) error {
 // ReportCommandResult calls POST /commands/{id}/result.
 func (client *HTTPClient) ReportCommandResult(ctx context.Context, id string, result CommandResult) error {
 	_, err := client.do(ctx, http.MethodPost, "/commands/"+url.PathEscape(id)+"/result", true, result, nil, nil)
+	return err
+}
+
+// ReportCommandOutput calls POST /commands/{id}/output. A 409 carries the
+// offset the backend expects in ProblemError.ExpectedOffset.
+func (client *HTTPClient) ReportCommandOutput(ctx context.Context, id string, chunk CommandOutputChunk) error {
+	_, err := client.do(ctx, http.MethodPost, "/commands/"+url.PathEscape(id)+"/output", true, chunk, nil, nil)
 	return err
 }
 

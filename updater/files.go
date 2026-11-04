@@ -286,29 +286,13 @@ func (store Store) WriteText(name, text string) error {
 // limit bytes that only its owner can access.
 func (store Store) readBytes(name string, limit int64) ([]byte, bool, error) {
 	path := store.path(name)
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > limit {
-		return nil, false, fmt.Errorf("%s is not a private regular file", path)
-	}
-	if store.Owner >= 0 {
-		if uid, ok := fileOwner(info); ok && uid != store.Owner {
-			return nil, false, fmt.Errorf("%s is owned by uid %d", path, uid)
-		}
-	}
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if err != nil {
+	file, info, err := store.openPrivate(name)
+	if err != nil || file == nil {
 		return nil, false, err
 	}
 	defer file.Close()
-	// The file seen by Lstat must be the file opened
-	if opened, err := file.Stat(); err != nil || !os.SameFile(info, opened) {
-		return nil, false, fmt.Errorf("%s changed while it was read", path)
+	if info.Size() > limit {
+		return nil, false, fmt.Errorf("%s is not a private regular file", path)
 	}
 	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
@@ -318,6 +302,91 @@ func (store Store) readBytes(name string, limit int64) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("%s is larger than %d bytes", path, limit)
 	}
 	return data, true, nil
+}
+
+// openPrivate opens name for reading. It refuses anything but a regular
+// file that only its owner can access; a missing file is a nil file.
+func (store Store) openPrivate(name string) (*os.File, os.FileInfo, error) {
+	path := store.path(name)
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		return nil, nil, fmt.Errorf("%s is not a private regular file", path)
+	}
+	if store.Owner >= 0 {
+		if uid, ok := fileOwner(info); ok && uid != store.Owner {
+			return nil, nil, fmt.Errorf("%s is owned by uid %d", path, uid)
+		}
+	}
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The file seen by Lstat must be the file opened
+	if opened, err := file.Stat(); err != nil || !os.SameFile(info, opened) {
+		file.Close()
+		return nil, nil, fmt.Errorf("%s changed while it was read", path)
+	}
+	return file, info, nil
+}
+
+// ReadRange returns at most limit bytes of name from offset and the file's
+// size, with the same checks as the JSON files but no size limit, for a
+// file that grows while it is read. found is false when it does not exist.
+func (store Store) ReadRange(name string, offset int64, limit int) (data []byte, size int64, found bool, err error) {
+	file, info, err := store.openPrivate(name)
+	if err != nil || file == nil {
+		return nil, 0, false, err
+	}
+	defer file.Close()
+	if opened, err := file.Stat(); err == nil {
+		info = opened
+	}
+	size = info.Size()
+	if offset < 0 || offset >= size || limit <= 0 {
+		return nil, size, true, nil
+	}
+	data = make([]byte, min(int64(limit), size-offset))
+	read, err := file.ReadAt(data, offset)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, size, true, err
+	}
+	return data[:read], size, true, nil
+}
+
+// OpenAppend opens name for appending, creating it, or emptying it with
+// truncate, private and owned like the other files, so a file the helper
+// writes as root stays readable by the unprivileged daemon.
+func (store Store) OpenAppend(name string, truncate bool) (*os.File, error) {
+	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND | syscall.O_NOFOLLOW
+	if truncate {
+		flags |= os.O_TRUNC
+	}
+	file, err := os.OpenFile(store.path(name), flags, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%s is not a regular file", store.path(name))
+	}
+	if err := file.Chmod(0o600); err != nil {
+		file.Close()
+		return nil, err
+	}
+	if os.Geteuid() == 0 && store.Owner > 0 {
+		if err := file.Chown(store.Owner, -1); err != nil {
+			file.Close()
+			return nil, err
+		}
+	}
+	return file, nil
 }
 
 // read decodes name strictly. It refuses anything but a small regular
