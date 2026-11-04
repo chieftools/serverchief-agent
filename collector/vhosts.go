@@ -185,7 +185,8 @@ var vhostSources = []vhostSource{
 
 // vhostChangeRoots are the configuration trees whose modification times
 // trigger an early collection. Plesk rewrites the per-domain web server
-// configuration under /var/www/vhosts/system whenever a domain changes.
+// configuration under /var/www/vhosts/system whenever a domain changes;
+// only its conf directories count (see ignoredChange).
 var vhostChangeRoots = []string{
 	"/etc/apache2",
 	"/etc/httpd",
@@ -203,9 +204,21 @@ const (
 	vhostChangeLimit = 20000
 )
 
+// pleskStatisticsFiles are the files Plesk's daily statistics run writes
+// to every domain's conf directory. They hold no web server configuration.
+var pleskStatisticsFiles = []string{"stat_ttl.conf", "prev_month.found"}
+
 // vhostSnapshotMaxAge bounds how old a vhosts collection may be for the
-// certificates dataset to reuse it instead of collecting again.
+// certificates and applications datasets to reuse it instead of collecting
+// again, as long as the configuration has not changed since.
 const vhostSnapshotMaxAge = 30 * time.Minute
+
+// vhostSnapshotFresh is how old a vhosts collection may be to be reused
+// even when the configuration changed since it. One inventory round
+// collects applications, certificates and vhosts one after another, so the
+// first of them collects and the others reuse its result instead of
+// running apachectl and plesk db again.
+const vhostSnapshotFresh = time.Minute
 
 // vhostSnapshot is the last successful collection, with the change token
 // taken before it.
@@ -256,12 +269,19 @@ func (collector *VHosts) ChangeToken() string {
 }
 
 // treeDigest writes the names, modification times and sizes of the entries
-// under roots, up to depth levels deep and limit entries per root.
+// under roots, up to depth levels deep and limit entries per root, leaving
+// out the entries ignoredChange names.
 func treeDigest(digest io.Writer, host *Host, roots []string, depth, limit int) {
 	for _, root := range roots {
 		count := 0
 		_ = fs.WalkDir(host.FS, relative(root), func(name string, entry fs.DirEntry, err error) error {
 			if err != nil {
+				return nil
+			}
+			if ignoredChange(name) {
+				if entry.IsDir() {
+					return fs.SkipDir
+				}
 				return nil
 			}
 			if count++; count > limit {
@@ -280,17 +300,44 @@ func treeDigest(digest io.Writer, host *Host, roots []string, depth, limit int) 
 	}
 }
 
+// ignoredChange reports whether an entry of the change roots (a path
+// relative to the host's root) is left out of the change tokens: the
+// entries of Plesk's per-domain directories under /var/www/vhosts/system
+// other than conf, and the statistics files in conf. The logs directory
+// there holds the access and error logs, which the web servers write on
+// every request, so a busy server would otherwise look like its
+// configuration changed at every poll.
+func ignoredChange(name string) bool {
+	domainEntry, ok := strings.CutPrefix(name, relative(pleskVhostsSystem)+"/")
+	if !ok {
+		return false
+	}
+	parts := strings.Split(domainEntry, "/")
+	switch {
+	case len(parts) < 2:
+		return false
+	case parts[1] != "conf":
+		return true
+	default:
+		return len(parts) == 3 && slices.Contains(pleskStatisticsFiles, parts[2])
+	}
+}
+
 // recent returns the items of a collection that is at most
-// vhostSnapshotMaxAge old and whose configuration has not changed since,
-// collecting again otherwise. The certificates dataset uses it to find the
-// sites' certificates without running apachectl and plesk db again.
+// vhostSnapshotFresh old, or at most vhostSnapshotMaxAge old with its
+// configuration unchanged since, collecting again otherwise. The
+// certificates and applications datasets use it to find the sites without
+// running apachectl and plesk db again.
 func (collector *VHosts) recent(ctx context.Context) ([]VHost, error) {
 	token := collector.ChangeToken()
 	collector.mu.Lock()
 	snapshot := collector.snapshot
 	collector.mu.Unlock()
-	if snapshot != nil && snapshot.token == token && collector.host.now().Sub(snapshot.at) < vhostSnapshotMaxAge {
-		return snapshot.items, nil
+	if snapshot != nil {
+		age := collector.host.now().Sub(snapshot.at)
+		if age < vhostSnapshotFresh || (snapshot.token == token && age < vhostSnapshotMaxAge) {
+			return snapshot.items, nil
+		}
 	}
 	payload, err := collector.Collect(ctx)
 	if err != nil {
@@ -302,10 +349,16 @@ func (collector *VHosts) recent(ctx context.Context) ([]VHost, error) {
 	return payload.(*VHostsInfo).Items, nil
 }
 
+// Collect collects the sites again, unless another dataset of the same
+// inventory round collected them less than vhostSnapshotFresh ago and the
+// configuration has not changed since.
 func (collector *VHosts) Collect(ctx context.Context) (any, error) {
 	token := collector.ChangeToken()
 	collector.mu.Lock()
 	defer collector.mu.Unlock()
+	if snapshot := collector.snapshot; snapshot != nil && snapshot.token == token && collector.host.now().Sub(snapshot.at) < vhostSnapshotFresh {
+		return &VHostsInfo{Items: slices.Clone(snapshot.items)}, nil
+	}
 
 	run := &vhostRun{host: collector.host, store: collector.store, certificates: make(map[string]*VHostCertificate), warnings: make(map[string][]string)}
 	info := &VHostsInfo{Items: []VHost{}}

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -936,6 +937,57 @@ func TestChangeTokenTriggersEarlyCollection(t *testing.T) {
 	daemon.pollChanges(now)
 	if daemon.next["packages"].After(now) {
 		t.Fatal("a changed token did not make the dataset due")
+	}
+}
+
+func TestChangingTokenCollectsAtMostOncePerCooldown(t *testing.T) {
+	server := newProtocolServer(t)
+	vhosts := &changingCollector{fakeCollector: fakeCollector{name: "vhosts", data: "a"}, token: "0"}
+	setup := newTestSetup(t, vhosts)
+	daemon := setup.daemon(t, server.client(), "vhosts")
+	daemon.options.ChangePoll = time.Minute
+	cooldown := changeCooldownPolls * time.Minute
+	start := time.Now()
+	daemon.next["vhosts"] = start.Add(time.Hour)
+	daemon.pollChanges(start)
+
+	// poll changes the token, polls at minute, collects when the dataset is
+	// due, as the run loop does, and returns when it was due.
+	poll := func(minute int) time.Time {
+		now := start.Add(time.Duration(minute) * time.Minute)
+		vhosts.mu.Lock()
+		vhosts.token = strconv.Itoa(minute)
+		vhosts.mu.Unlock()
+		daemon.pollChanges(now)
+		due := daemon.next["vhosts"]
+		if !due.After(now) {
+			daemon.next["vhosts"] = now.Add(time.Hour)
+		}
+		return due
+	}
+
+	if due := poll(1); !due.Equal(start.Add(time.Minute)) {
+		t.Fatalf("a first change made the dataset due at %s, not now", due.Sub(start))
+	}
+	for minute := 2; minute <= 5; minute++ {
+		if due := poll(minute); !due.Equal(start.Add(time.Minute + cooldown)) {
+			t.Fatalf("a change at minute %d made the dataset due at %s, not after the cooldown", minute, due.Sub(start))
+		}
+	}
+	if due := poll(6); !due.Equal(start.Add(6 * time.Minute)) {
+		t.Fatalf("the changes were collected at %s, not when the cooldown ended", due.Sub(start))
+	}
+	if due := poll(7); !due.Equal(start.Add(6*time.Minute + cooldown)) {
+		t.Fatalf("a change right after the delayed collection made the dataset due at %s", due.Sub(start))
+	}
+
+	if due := poll(11); !due.Equal(start.Add(11 * time.Minute)) {
+		t.Fatalf("the change at minute 7 was collected at %s", due.Sub(start))
+	}
+
+	// A change long after the last one is collected at once again.
+	if due := poll(30); !due.Equal(start.Add(30 * time.Minute)) {
+		t.Fatalf("a change after a quiet period made the dataset due at %s", due.Sub(start))
 	}
 }
 

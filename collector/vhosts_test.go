@@ -713,6 +713,74 @@ func TestVHostsChangeToken(t *testing.T) {
 	}
 }
 
+func TestVHostsChangeTokenIgnoresPleskLogsAndStatistics(t *testing.T) {
+	system := "var/www/vhosts/system/example.com/"
+	fsys := fstest.MapFS{}
+	for _, name := range []string{"conf/httpd.conf", "conf/stat_ttl.conf", "conf/prev_month.found", "logs/access_ssl_log", "logs/error_log", "statistics/webstat/index.html", "etc/php.ini"} {
+		fsys[system+name] = &fstest.MapFile{Data: []byte("x"), ModTime: time.Unix(100, 0)}
+	}
+	collector := NewVHosts(&Host{FS: fsys})
+	before := collector.ChangeToken()
+	for _, name := range []string{"logs/access_ssl_log", "logs/error_log", "conf/stat_ttl.conf", "conf/prev_month.found", "statistics/webstat/index.html", "etc/php.ini"} {
+		fsys[system+name] = &fstest.MapFile{Data: []byte("xx"), ModTime: time.Unix(200, 0)}
+		if collector.ChangeToken() != before {
+			t.Fatalf("writing %s changed the token", name)
+		}
+	}
+	fsys[system+"logs/access_log.processed"] = &fstest.MapFile{Data: []byte("x"), ModTime: time.Unix(200, 0)}
+	if collector.ChangeToken() != before {
+		t.Fatal("a rotated log changed the token")
+	}
+	fsys[system+"conf/httpd.conf"].ModTime = time.Unix(200, 0)
+	if collector.ChangeToken() == before {
+		t.Fatal("regenerating httpd.conf kept the token")
+	}
+}
+
+func TestVHostsReuseACollectionWithinOneRound(t *testing.T) {
+	files := vhostFixture(t, "apache-debian", map[string][]byte{"usr/sbin/apache2ctl": nil})
+	now := time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC)
+	var ran []string
+	host := &Host{
+		FS:      files,
+		Command: vhostCommands(t, "apache-debian", []vhostCommand{{prefix: "apache2ctl -S", file: "apache2ctl-S.txt"}}, &ran),
+		Now:     func() time.Time { return now },
+	}
+	collector := NewVHosts(host)
+	touch := func() {
+		files["etc/apache2/sites-enabled/example.com.conf"].ModTime = now
+	}
+
+	// applications collects first; certificates and vhosts reuse it, also
+	// when the configuration changed in between.
+	if _, err := collector.recent(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(10 * time.Second)
+	touch()
+	if _, err := collector.recent(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(ran) != 1 {
+		t.Fatalf("ran %v within one round", ran)
+	}
+	collectVHosts(t, collector)
+	if len(ran) != 2 {
+		t.Fatalf("ran %v: the vhosts dataset reused a collection of an older configuration", ran)
+	}
+	now = now.Add(20 * time.Second)
+	if info := collectVHosts(t, collector); len(ran) != 2 || len(info.Items) != 3 {
+		t.Fatalf("ran %v, items %s: the vhosts dataset did not reuse a fresh collection", ran, vhostsJSON(t, info))
+	}
+
+	// A later round collects again.
+	now = now.Add(vhostSnapshotFresh)
+	collectVHosts(t, collector)
+	if len(ran) != 3 {
+		t.Fatalf("ran %v: a later round reused the collection", ran)
+	}
+}
+
 func TestReadCertificateFile(t *testing.T) {
 	certificate, key := testCertificate(t, "Example.COM", []string{"WWW.example.com", "example.com", "example.com"}, certificateExpiry)
 	other, _ := testCertificate(t, "intermediate.example", nil, certificateExpiry)

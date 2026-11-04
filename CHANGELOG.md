@@ -21,6 +21,10 @@ release.
 
 ### Fixed
 
+- Fixed the agent collecting the sites, certificates and applications of busy Plesk servers every minute. Every request writes a site's access log under `/var/www/vhosts/system`, which the agent took for a change of the web server configuration, so it ran `apachectl -S` several times a minute. Only the generated configuration in each domain's `conf` directory counts now, without the files of Plesk's daily statistics run.
+- One inventory round runs `apachectl -S` and the Plesk queries once instead of once for each of the sites, certificates and applications datasets.
+- A source that keeps changing is collected at most once every 5 minutes. A first change is still collected right away.
+- Fixed configuration changes of some Plesk domains going unnoticed until the next scheduled collection on servers with many domains, because their logs counted towards the limit of entries checked for changes.
 - Fixed one application being listed twice when its sites use document roots linked to the same directory, such as DirectAdmin's `private_html` linked to `public_html`. These sites are now one application, reported at the directory itself rather than at the link.
 
 ## [0.3.1]

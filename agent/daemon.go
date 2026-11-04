@@ -26,6 +26,11 @@ const (
 	unsupportedRetry      = time.Hour
 	defaultCollectTimeout = 2 * time.Minute
 	defaultChangePoll     = time.Minute
+	// changeCooldownPolls is how many change polls must pass before a
+	// changed token makes a dataset due again. A first change is collected
+	// at once; a source that keeps changing is collected at most once per
+	// cooldown (5 minutes by default).
+	changeCooldownPolls = 5
 )
 
 // RunOptions configures Run.
@@ -100,6 +105,8 @@ type daemon struct {
 	next         map[string]time.Time
 	changeTokens map[string]string
 	changePollAt time.Time
+	// changeDueAt holds when a changed token last made each dataset due.
+	changeDueAt map[string]time.Time
 
 	heartbeatAt      time.Time
 	heartbeatBackoff time.Duration
@@ -188,6 +195,7 @@ func newDaemon(options RunOptions) *daemon {
 		startedAt:        now.UTC().Truncate(time.Second),
 		next:             make(map[string]time.Time),
 		changeTokens:     make(map[string]string),
+		changeDueAt:      make(map[string]time.Time),
 		ignored:          make(map[string]bool),
 		heartbeatAt:      now,
 		heartbeatBackoff: initialBackoff,
@@ -634,7 +642,8 @@ func (daemon *daemon) hasChangeDetectors() bool {
 }
 
 // pollChanges makes a dataset due when its change token moved, for example
-// when the package database was written.
+// when the package database was written. Within changeCooldownPolls polls
+// of the previous change it is made due when that cooldown ends instead.
 func (daemon *daemon) pollChanges(now time.Time) {
 	daemon.changePollAt = now.Add(daemon.options.ChangePoll)
 	for name := range daemon.next {
@@ -650,11 +659,31 @@ func (daemon *daemon) pollChanges(now time.Time) {
 		}
 		token := detector.ChangeToken()
 		if previous, seen := daemon.changeTokens[name]; seen && previous != token {
-			log.Printf("[collector] %s source changed; collecting now", name)
-			daemon.next[name] = now
+			daemon.changeDue(name, now)
 		}
 		daemon.changeTokens[name] = token
 	}
+}
+
+// changeDue makes a changed dataset due now, or when the cooldown after
+// its previous change ends.
+func (daemon *daemon) changeDue(name string, now time.Time) {
+	at := now
+	if previous, seen := daemon.changeDueAt[name]; seen {
+		if cooldownEnd := previous.Add(changeCooldownPolls * daemon.options.ChangePoll); cooldownEnd.After(at) {
+			at = cooldownEnd
+		}
+	}
+	if !at.Before(daemon.next[name]) {
+		return
+	}
+	if at.Equal(now) {
+		log.Printf("[collector] %s source changed; collecting now", name)
+	} else {
+		log.Printf("[collector] %s source changed again; collecting at %s", name, at.UTC().Format(time.TimeOnly))
+	}
+	daemon.next[name] = at
+	daemon.changeDueAt[name] = at
 }
 
 // deliver runs one inventory round for due datasets and schedules them
