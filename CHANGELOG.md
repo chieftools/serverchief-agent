@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.5.0]
+
 ### Changed
 
 - The output of scheduling a reboot shows on the dashboard right away, instead of only once the server is back. The result adds a line on when the server booted again and how long after the reboot was scheduled, or which boot it still runs when it did not reboot.
@@ -148,7 +150,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.5.0
 [0.4.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.4.0
 [0.3.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.3.1
 [0.3.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.3.0
