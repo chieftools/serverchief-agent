@@ -22,7 +22,7 @@ import (
 
 func readFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "protocol", name))
+	data, err := os.ReadFile(filepath.Join("..", "docs", "protocol", "fixtures", name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestHTTPClientEndpointsAndHeaders(t *testing.T) {
 }
 
 func readFixtureNoT(name string) []byte {
-	data, err := os.ReadFile(filepath.Join("testdata", "protocol", name))
+	data, err := os.ReadFile(filepath.Join("..", "docs", "protocol", "fixtures", name))
 	if err != nil {
 		panic(err)
 	}
