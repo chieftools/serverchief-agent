@@ -1,19 +1,19 @@
 # Ploi Webserver Configuration, do not remove!
-include /etc/nginx/ploi/backup.chief.app/before/*;
+include /etc/nginx/ploi/backup.example.org/before/*;
 
 server {
     #listen 80;
     #listen [::]:80;
 
-    root /home/backupchief/backup.chief.app/production/current/public;
-    server_name backup.chief.app;
+    root /home/frank/backup.example.org/production/current/public;
+    server_name backup.example.org;
 
-    include /etc/nginx/ssl/backup.chief.app;
+    include /etc/nginx/ssl/backup.example.org;
 
     index index.php;
 
     # Ploi Configuration, do not remove!
-    include /etc/nginx/ploi/backup.chief.app/server/*;
+    include /etc/nginx/ploi/backup.example.org/server/*;
 
     location / {
         # Remove any leading index.php/index.html/index.htm from the request url
@@ -23,9 +23,9 @@ server {
 
     location = /index.php {
         include fastcgi_params;
-        fastcgi_pass unix:/run/php/php8.5-fpm-backupchief.sock;
+        fastcgi_pass unix:/run/php/php8.5-fpm-frank.sock;
     }
 }
 
 # Ploi Webserver Configuration, do not remove!
-include /etc/nginx/ploi/backup.chief.app/after/*;
+include /etc/nginx/ploi/backup.example.org/after/*;

@@ -1094,32 +1094,32 @@ var _ io.Reader = (*trackedFile)(nil)
 // under /root.
 func TestCertificatesForge(t *testing.T) {
 	pki := newTestPKI(t)
-	afspraak, _ := pki.leaf(t, leafOptions{commonName: "afspraak.mkin.nl", names: []string{"afspraak.mkin.nl", "www.afspraak.mkin.nl"}})
-	admin, _ := pki.leaf(t, leafOptions{commonName: "admin.zdcheck.mkin.nl", names: []string{"admin.zdcheck.mkin.nl"}})
-	zdcheck, _ := pki.leaf(t, leafOptions{commonName: "zdcheck.mkin.nl", names: []string{"zdcheck.mkin.nl"}})
+	booking, _ := pki.leaf(t, leafOptions{commonName: "booking.example.com", names: []string{"booking.example.com", "www.booking.example.com"}})
+	admin, _ := pki.leaf(t, leafOptions{commonName: "admin.status.example.com", names: []string{"admin.status.example.com"}})
+	status, _ := pki.leaf(t, leafOptions{commonName: "status.example.com", names: []string{"status.example.com"}})
 	tracker := &readTracker{MapFS: vhostFixture(t, "forge", map[string][]byte{
 		"usr/sbin/nginx": nil,
-		"etc/nginx/ssl/domains/1937544/3714827/server.crt": afspraak,
-		"etc/nginx/ssl/domains/1037424/2979372/server.crt": admin,
+		"etc/nginx/ssl/domains/200001/300001/server.crt": booking,
+		"etc/nginx/ssl/domains/200002/300002/server.crt": admin,
 		// A certificate Forge installed but does not renew.
-		"etc/nginx/ssl/domains/1037519/2979440/server.crt":     zdcheck,
-		"etc/cron.d/letsencrypt-renew-domain-1937544":          []byte("SHELL=/bin/sh\nPATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n\n44 19 * * 0 root /bin/bash /root/.letsencrypt-renew/3714827\n"),
-		"etc/cron.d/letsencrypt-renew-domain-1037424":          []byte("43 7 * * 2 root /bin/bash /root/.letsencrypt-renew/2979372\n"),
-		"root/.letsencrypt-renew/3714827":                      []byte("never read"),
-		"etc/cron.d/letsencrypt-renew-domain-1037519.dpkg-old": []byte("13 9 * * 1 root /bin/bash /root/.letsencrypt-renew/2979440\n"),
+		"etc/nginx/ssl/domains/200003/300003/server.crt":      status,
+		"etc/cron.d/letsencrypt-renew-domain-200001":          []byte("SHELL=/bin/sh\nPATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n\n44 19 * * 0 root /bin/bash /root/.letsencrypt-renew/300001\n"),
+		"etc/cron.d/letsencrypt-renew-domain-200002":          []byte("43 7 * * 2 root /bin/bash /root/.letsencrypt-renew/300002\n"),
+		"root/.letsencrypt-renew/300001":                      []byte("never read"),
+		"etc/cron.d/letsencrypt-renew-domain-200003.dpkg-old": []byte("13 9 * * 1 root /bin/bash /root/.letsencrypt-renew/300003\n"),
 	})}
 	var ran []string
 	host := &Host{FS: tracker, Roots: pki.roots(), Command: vhostCommands(t, "forge", []vhostCommand{{prefix: "nginx -V", file: "nginx-V.txt"}}, &ran)}
 	vhosts := NewVHosts(host)
 	items := certificatesByFingerprint(t, collectCertificates(t, NewCertificates(host, vhosts)))
-	if got, want := managerString(items[pemFingerprint(t, afspraak)].ManagedBy), "forge|3714827|<nil>|<nil>|<nil>|<nil>|<nil>|cron|/root/.letsencrypt-renew/3714827"; got != want {
-		t.Errorf("afspraak managed_by\n got %s\nwant %s", got, want)
+	if got, want := managerString(items[pemFingerprint(t, booking)].ManagedBy), "forge|300001|<nil>|<nil>|<nil>|<nil>|<nil>|cron|/root/.letsencrypt-renew/300001"; got != want {
+		t.Errorf("booking managed_by\n got %s\nwant %s", got, want)
 	}
-	if got, want := managerString(items[pemFingerprint(t, admin)].ManagedBy), "forge|2979372|<nil>|<nil>|<nil>|<nil>|<nil>|cron|/root/.letsencrypt-renew/2979372"; got != want {
+	if got, want := managerString(items[pemFingerprint(t, admin)].ManagedBy), "forge|300002|<nil>|<nil>|<nil>|<nil>|<nil>|cron|/root/.letsencrypt-renew/300002"; got != want {
 		t.Errorf("admin managed_by\n got %s\nwant %s", got, want)
 	}
-	if manager := items[pemFingerprint(t, zdcheck)].ManagedBy; manager != nil {
-		t.Errorf("zdcheck managed_by = %s", managerString(manager))
+	if manager := items[pemFingerprint(t, status)].ManagedBy; manager != nil {
+		t.Errorf("status managed_by = %s", managerString(manager))
 	}
 	for name := range tracker.opens {
 		if strings.HasPrefix(name, "root/") {

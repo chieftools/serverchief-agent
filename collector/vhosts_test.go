@@ -945,19 +945,19 @@ func TestVHostsApacheThroughTheRootHelperWhenTheDaemonCannotReadTheConfig(t *tes
 // sites come with an HTTPS redirect for ".<name>" and a www redirect, and
 // certbot's nginx installer: the redirects fold into their sites.
 func TestVHostsNginxFoldsPanelRedirects(t *testing.T) {
-	afspraakCert, _ := testCertificate(t, "afspraak.mkin.nl", []string{"afspraak.mkin.nl", "www.afspraak.mkin.nl"}, certificateExpiry)
-	adminCert, _ := testCertificate(t, "admin.zdcheck.mkin.nl", []string{"admin.zdcheck.mkin.nl"}, certificateExpiry)
-	zdcheckCert, _ := testCertificate(t, "zdcheck.mkin.nl", []string{"zdcheck.mkin.nl"}, certificateExpiry)
-	backupCert, _ := testCertificate(t, "backup.chief.app", []string{"backup.chief.app", "www.backup.chief.app"}, certificateExpiry)
+	bookingCert, _ := testCertificate(t, "booking.example.com", []string{"booking.example.com", "www.booking.example.com"}, certificateExpiry)
+	adminCert, _ := testCertificate(t, "admin.status.example.com", []string{"admin.status.example.com"}, certificateExpiry)
+	statusCert, _ := testCertificate(t, "status.example.com", []string{"status.example.com"}, certificateExpiry)
+	backupCert, _ := testCertificate(t, "backup.example.org", []string{"backup.example.org", "www.backup.example.org"}, certificateExpiry)
 	certbotCert, _ := testCertificate(t, "certbot.example.org", []string{"certbot.example.org"}, certificateExpiry)
 	var ran []string
 	host := &Host{
 		FS: vhostFixture(t, "forge", map[string][]byte{
 			"usr/sbin/nginx": nil,
-			"etc/nginx/ssl/domains/1937544/3714827/server.crt":       afspraakCert,
-			"etc/nginx/ssl/domains/1037424/2979372/server.crt":       adminCert,
-			"etc/nginx/ssl/domains/1037519/2979440/server.crt":       zdcheckCert,
-			"etc/letsencrypt/live/backup.chief.app/fullchain.pem":    backupCert,
+			"etc/nginx/ssl/domains/200001/300001/server.crt":         bookingCert,
+			"etc/nginx/ssl/domains/200002/300002/server.crt":         adminCert,
+			"etc/nginx/ssl/domains/200003/300003/server.crt":         statusCert,
+			"etc/letsencrypt/live/backup.example.org/fullchain.pem":  backupCert,
 			"etc/letsencrypt/live/certbot.example.org/fullchain.pem": certbotCert,
 		}),
 		Command: vhostCommands(t, "forge", []vhostCommand{{prefix: "nginx -V", file: "nginx-V.txt"}}, &ran),
@@ -967,16 +967,16 @@ func TestVHostsNginxFoldsPanelRedirects(t *testing.T) {
 		return `{"subject":"` + subject + `","issuer":"Test CA","not_after":"2027-01-20T08:30:00Z","names":` + names + `,"fingerprint":"` + pemFingerprint(t, data) + `"}`
 	}
 	checkVHosts(t, info, map[string]string{
-		"nginx/admin.zdcheck.mkin.nl": `{"source":"nginx","name":"admin.zdcheck.mkin.nl","aliases":[],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/mkin/admin.zdcheck.mkin.nl/current/public","php":{"version":"8.3","handler":"fpm"},"certificate":` + certificate(adminCert, "admin.zdcheck.mkin.nl", `["admin.zdcheck.mkin.nl"]`) + `,"config_file":"/etc/nginx/sites-enabled/admin.zdcheck.mkin.nl","owner":"mkin","redirect":null,"https_redirect":true}`,
-		"nginx/afspraak.mkin.nl":      `{"source":"nginx","name":"afspraak.mkin.nl","aliases":["www.afspraak.mkin.nl"],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/mkin/afspraak.mkin.nl/current/public","php":{"version":"8.3","handler":"fpm"},"certificate":` + certificate(afspraakCert, "afspraak.mkin.nl", `["afspraak.mkin.nl","www.afspraak.mkin.nl"]`) + `,"config_file":"/etc/nginx/sites-enabled/afspraak.mkin.nl","owner":"mkin","redirect":null,"https_redirect":true}`,
-		"nginx/zdcheck.mkin.nl":       `{"source":"nginx","name":"zdcheck.mkin.nl","aliases":[],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/afspraak/zdcheck.mkin.nl/current/public","php":{"version":"8.3","handler":"fpm"},"certificate":` + certificate(zdcheckCert, "zdcheck.mkin.nl", `["zdcheck.mkin.nl"]`) + `,"config_file":"/etc/nginx/sites-enabled/zdcheck.mkin.nl","owner":"afspraak","redirect":null,"https_redirect":true}`,
-		"nginx/backup.chief.app":      `{"source":"nginx","name":"backup.chief.app","aliases":["www.backup.chief.app"],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/backupchief/backup.chief.app/production/current/public","php":{"version":"8.5","handler":"fpm"},"certificate":` + certificate(backupCert, "backup.chief.app", `["backup.chief.app","www.backup.chief.app"]`) + `,"config_file":"/etc/nginx/sites-enabled/backup.chief.app","owner":"backupchief","redirect":null,"https_redirect":true}`,
-		"nginx/certbot.example.org":   `{"source":"nginx","name":"certbot.example.org","aliases":[],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":"/var/www/certbot","php":null,"certificate":` + certificate(certbotCert, "certbot.example.org", `["certbot.example.org"]`) + `,"config_file":"/etc/nginx/conf.d/certbot.example.org.conf","owner":null,"redirect":null,"https_redirect":true}`,
-		"nginx/plesk.example":         `{"source":"nginx","name":"plesk.example","aliases":["ipv4.plesk.example","www.plesk.example"],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/plesk.example.conf","owner":null,"redirect":null,"https_redirect":true}`,
-		"nginx/preferred.example":     `{"source":"nginx","name":"preferred.example","aliases":["alias.example","ipv4.preferred.example","www.preferred.example"],"ports":[443],"ssl":true,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/plesk.example.conf","owner":null,"redirect":null,"https_redirect":false}`,
-		"nginx/helpdesk.example.org":  `{"source":"nginx","name":"helpdesk.example.org","aliases":[],"ports":[443],"ssl":true,"http2":true,"http3":true,"document_root":"/home/helpdesk/helpdesk.example.org/public","php":null,"certificate":null,"config_file":"/etc/nginx/sites-enabled/helpdesk.example.org","owner":null,"redirect":null,"https_redirect":false}`,
-		"nginx/noh3.example.org":      `{"source":"nginx","name":"noh3.example.org","aliases":[],"ports":[443],"ssl":true,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/noh3.example.org.conf","owner":null,"redirect":null,"https_redirect":false}`,
-		"nginx/old.example.org":       `{"source":"nginx","name":"old.example.org","aliases":["www.old.example.org"],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/old.example.org.conf","owner":null,"redirect":{"status":308,"target":"https://new.example.net$request_uri","host":"new.example.net"},"https_redirect":false}`,
+		"nginx/admin.status.example.com": `{"source":"nginx","name":"admin.status.example.com","aliases":[],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/dave/admin.status.example.com/current/public","php":{"version":"8.3","handler":"fpm"},"certificate":` + certificate(adminCert, "admin.status.example.com", `["admin.status.example.com"]`) + `,"config_file":"/etc/nginx/sites-enabled/admin.status.example.com","owner":"dave","redirect":null,"https_redirect":true}`,
+		"nginx/booking.example.com":      `{"source":"nginx","name":"booking.example.com","aliases":["www.booking.example.com"],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/dave/booking.example.com/current/public","php":{"version":"8.3","handler":"fpm"},"certificate":` + certificate(bookingCert, "booking.example.com", `["booking.example.com","www.booking.example.com"]`) + `,"config_file":"/etc/nginx/sites-enabled/booking.example.com","owner":"dave","redirect":null,"https_redirect":true}`,
+		"nginx/status.example.com":       `{"source":"nginx","name":"status.example.com","aliases":[],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/erin/status.example.com/current/public","php":{"version":"8.3","handler":"fpm"},"certificate":` + certificate(statusCert, "status.example.com", `["status.example.com"]`) + `,"config_file":"/etc/nginx/sites-enabled/status.example.com","owner":"erin","redirect":null,"https_redirect":true}`,
+		"nginx/backup.example.org":       `{"source":"nginx","name":"backup.example.org","aliases":["www.backup.example.org"],"ports":[80,443],"ssl":true,"http2":true,"http3":false,"document_root":"/home/frank/backup.example.org/production/current/public","php":{"version":"8.5","handler":"fpm"},"certificate":` + certificate(backupCert, "backup.example.org", `["backup.example.org","www.backup.example.org"]`) + `,"config_file":"/etc/nginx/sites-enabled/backup.example.org","owner":"frank","redirect":null,"https_redirect":true}`,
+		"nginx/certbot.example.org":      `{"source":"nginx","name":"certbot.example.org","aliases":[],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":"/var/www/certbot","php":null,"certificate":` + certificate(certbotCert, "certbot.example.org", `["certbot.example.org"]`) + `,"config_file":"/etc/nginx/conf.d/certbot.example.org.conf","owner":null,"redirect":null,"https_redirect":true}`,
+		"nginx/plesk.example":            `{"source":"nginx","name":"plesk.example","aliases":["ipv4.plesk.example","www.plesk.example"],"ports":[80,443],"ssl":true,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/plesk.example.conf","owner":null,"redirect":null,"https_redirect":true}`,
+		"nginx/preferred.example":        `{"source":"nginx","name":"preferred.example","aliases":["alias.example","ipv4.preferred.example","www.preferred.example"],"ports":[443],"ssl":true,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/plesk.example.conf","owner":null,"redirect":null,"https_redirect":false}`,
+		"nginx/helpdesk.example.org":     `{"source":"nginx","name":"helpdesk.example.org","aliases":[],"ports":[443],"ssl":true,"http2":true,"http3":true,"document_root":"/home/helpdesk/helpdesk.example.org/public","php":null,"certificate":null,"config_file":"/etc/nginx/sites-enabled/helpdesk.example.org","owner":null,"redirect":null,"https_redirect":false}`,
+		"nginx/noh3.example.org":         `{"source":"nginx","name":"noh3.example.org","aliases":[],"ports":[443],"ssl":true,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/noh3.example.org.conf","owner":null,"redirect":null,"https_redirect":false}`,
+		"nginx/old.example.org":          `{"source":"nginx","name":"old.example.org","aliases":["www.old.example.org"],"ports":[80],"ssl":false,"http2":false,"http3":false,"document_root":null,"php":null,"certificate":null,"config_file":"/etc/nginx/conf.d/old.example.org.conf","owner":null,"redirect":{"status":308,"target":"https://new.example.net$request_uri","host":"new.example.net"},"https_redirect":false}`,
 	})
 }
 

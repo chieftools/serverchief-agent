@@ -41,7 +41,7 @@ var (
 	acmeShCron       = regexp.MustCompile(`acme\.sh(\s.*)?\s--cron(\s|$)`)
 	// forgeRenewCron matches the job Laravel Forge installs for each Let's
 	// Encrypt certificate in /etc/cron.d/letsencrypt-renew-domain-<id>:
-	// "43 7 * * 2 root /bin/bash /root/.letsencrypt-renew/2979372".
+	// "43 7 * * 2 root /bin/bash /root/.letsencrypt-renew/300002".
 	forgeRenewCron = regexp.MustCompile(`(/\S*/\.letsencrypt-renew/([0-9]+))(\s|$)`)
 )
 

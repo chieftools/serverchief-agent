@@ -9,7 +9,7 @@ network-config:
     subnets:
     - ipv4: true
       type: dhcp
-    - address: 2a01:4f8:c17:1234::1/64
+    - address: 2001:db8:c17:1234::1/64
       gateway: fe80::1
       ipv6: true
       type: static
