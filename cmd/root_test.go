@@ -26,7 +26,7 @@ func TestVersionCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(stdout, "Server Chief agent 1.2.3 (") || !strings.Contains(stdout, "protocol 1.2.0") {
+	if !strings.HasPrefix(stdout, "Server Chief agent 1.2.3 (") || !strings.Contains(stdout, "protocol 1.3.0") {
 		t.Fatalf("version output = %q", stdout)
 	}
 }

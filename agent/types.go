@@ -14,7 +14,7 @@ import (
 
 const (
 	// ProtocolRevision is the agent ↔ backend protocol this build speaks.
-	ProtocolRevision = "1.2.0"
+	ProtocolRevision = "1.3.0"
 	// ProtocolHeader carries ProtocolRevision on every request.
 	ProtocolHeader = "ServerChief-Protocol-Revision"
 	// DefaultEndpoint is the production agent API.

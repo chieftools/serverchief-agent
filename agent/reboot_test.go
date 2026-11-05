@@ -235,6 +235,11 @@ func TestRebootIsHandedOffOnceAndReportedAfterTheReboot(t *testing.T) {
 	if results := setup.server.resultsOf("r1"); len(results) != 0 {
 		t.Fatalf("results before the reboot = %+v", results)
 	}
+	// The output of scheduling it goes out right away, not after the boot.
+	if chunks := setup.server.outputOf("r1"); len(chunks) != 1 || chunks[0].Offset != 0 || chunks[0].Output != setup.reboots.output || chunks[0].Length != int64(len(setup.reboots.output)) {
+		t.Fatalf("live output = %+v", chunks)
+	}
+	scheduledAt := setup.clock.Now()
 	// The update poll leaves a handed-off reboot alone, and the command is
 	// never executed twice when the backend lists it again.
 	setup.clock.advance(time.Second)
@@ -247,7 +252,8 @@ func TestRebootIsHandedOffOnceAndReportedAfterTheReboot(t *testing.T) {
 	}
 
 	setup.clock.advance(90 * time.Second)
-	setup.reboots.rebooted(setup.clock.Now().Add(-30 * time.Second).UTC().Truncate(time.Second))
+	bootedAt := scheduledAt.Add(61 * time.Second).UTC().Truncate(time.Second)
+	setup.reboots.rebooted(bootedAt)
 	second := setup.start(t)
 	tick(t, second)
 	results := setup.server.resultsOf("r1")
@@ -258,8 +264,10 @@ func TestRebootIsHandedOffOnceAndReportedAfterTheReboot(t *testing.T) {
 	if data.Code != RebootCodeRebooted || !data.PreviousBootTime.Equal(time.Date(2026, 10, 18, 5, 37, 22, 0, time.UTC)) || data.BootTime == nil || !data.BootTime.After(*data.PreviousBootTime) {
 		t.Fatalf("data = %+v", data)
 	}
-	if results[0].Output == nil || *results[0].Output != setup.reboots.output || results[0].OutputTruncated == nil || *results[0].OutputTruncated {
-		t.Fatalf("output = %v", results[0].Output)
+	// The result's output adds how the reboot went.
+	want := setup.reboots.output + "# The server rebooted: it booted again at " + bootedAt.Format("2006-01-02 15:04:05") + " UTC, 1m1s after the reboot was scheduled\n"
+	if results[0].Output == nil || *results[0].Output != want || results[0].OutputTruncated == nil || *results[0].OutputTruncated {
+		t.Fatalf("output = %q", *results[0].Output)
 	}
 	if setup.reboots.requestExists() || setup.reboots.count() != 1 {
 		t.Fatal("request kept or rebooted twice")
@@ -288,6 +296,9 @@ func TestRebootThatDoesNotHappenIsReportedAfterTenMinutes(t *testing.T) {
 	if len(results) != 1 || results[0].Status != CommandFailed || rebootResultData(t, results[0]).Code != RebootCodeNotRebooted ||
 		results[0].Detail == nil || !strings.Contains(*results[0].Detail, "did not reboot within 10 minutes") || results[0].Output == nil {
 		t.Fatalf("results = %+v", results)
+	}
+	if want := setup.reboots.output + "# The server did not reboot: it still runs the boot of 2026-10-18 05:37:22 UTC, 10 minutes after the reboot was scheduled\n"; *results[0].Output != want {
+		t.Fatalf("output = %q", *results[0].Output)
 	}
 	if setup.reboots.requestExists() {
 		t.Fatal("request kept")
@@ -542,5 +553,61 @@ func TestRebootSendsAHeartbeatOnceItIsScheduled(t *testing.T) {
 	tick(t, daemon)
 	if got := requestsSince(setup.server, before); !slices.Contains(got, "/heartbeat") {
 		t.Fatalf("requests = %q", got)
+	}
+}
+
+func TestRebootOutputIsSentAgainAfterAFailureUntilTheServerGoesDown(t *testing.T) {
+	setup := newRebootSetup(t)
+	daemon := setup.start(t)
+	tick(t, daemon)
+
+	setup.server.fail("/commands/r1/output", failure{status: 503, body: `{"type":"unavailable","status":503,"title":"Unavailable"}`})
+	setup.command(t, daemon, "r1", `{}`)
+	if chunks := setup.server.outputOf("r1"); len(chunks) != 0 {
+		t.Fatalf("chunks = %+v", chunks)
+	}
+	if at := daemon.wakeAt(); at.After(setup.clock.Now().Add(upgradeStreamRetry + time.Second)) {
+		t.Fatalf("wakes at %v", at)
+	}
+	setup.clock.advance(upgradeStreamRetry + time.Second)
+	tick(t, daemon)
+	if chunks := setup.server.outputOf("r1"); len(chunks) != 1 || chunks[0].Output != setup.reboots.output {
+		t.Fatalf("chunks = %+v", chunks)
+	}
+
+	// Once the server would have gone down it is no longer sent.
+	late := newRebootSetup(t)
+	lateDaemon := late.start(t)
+	tick(t, lateDaemon)
+	late.server.fail("/commands/r1/output", failure{status: 503, body: `{"type":"unavailable","status":503,"title":"Unavailable"}`})
+	late.command(t, lateDaemon, "r1", `{}`)
+	if requests := late.server.requestLog(); !slices.Contains(requests, "/commands/r1/output") {
+		t.Fatalf("not tried: %q", requests)
+	}
+	before := len(late.server.requestLog())
+	late.clock.advance(rebootOutputPatience)
+	tick(t, lateDaemon)
+	if got := requestsSince(late.server, before); slices.Contains(got, "/commands/r1/output") {
+		t.Fatalf("sent after the server went down: %q", got)
+	}
+	if lateDaemon.reboot.output != nil {
+		t.Fatal("output kept")
+	}
+}
+
+func TestRebootOutputIsDroppedWhenTheBackendRejectsIt(t *testing.T) {
+	setup := newRebootSetup(t)
+	daemon := setup.start(t)
+	tick(t, daemon)
+
+	setup.server.fail("/commands/r1/output", failure{status: 404, body: `{"type":"not_found","status":404,"title":"Not found"}`})
+	setup.command(t, daemon, "r1", `{}`)
+	before := len(setup.server.requestLog())
+	for range 3 {
+		setup.clock.advance(upgradeStreamRetry)
+		tick(t, daemon)
+	}
+	if got := requestsSince(setup.server, before); slices.Contains(got, "/commands/r1/output") {
+		t.Fatalf("sent again after a rejection: %q", got)
 	}
 }

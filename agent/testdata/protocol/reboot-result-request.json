@@ -6,7 +6,7 @@
   },
   "detail": null,
   "finished_at": "2026-10-22T14:14:20Z",
-  "output": "$ /sbin/shutdown -r +1 Server Chief: rebooting in 1 minute, requested from the panel\nShutdown scheduled for Thu 2026-10-22 14:13:03 UTC, use 'shutdown -c' to cancel.\n",
+  "output": "$ /sbin/shutdown -r +1 Server Chief: rebooting in 1 minute, requested from the panel\nShutdown scheduled for Thu 2026-10-22 14:13:03 UTC, use 'shutdown -c' to cancel.\n# The server rebooted: it booted again at 2026-10-22 14:13:41 UTC, 1m38s after the reboot was scheduled\n",
   "output_truncated": false,
   "status": "succeeded"
 }

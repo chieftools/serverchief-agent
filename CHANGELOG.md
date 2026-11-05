@@ -9,6 +9,11 @@ release.
 
 ## [Unreleased]
 
+### Changed
+
+- The output of scheduling a reboot shows on the dashboard right away, instead of only once the server is back. The result adds a line on when the server booted again and how long after the reboot was scheduled, or which boot it still runs when it did not reboot.
+- The agent speaks revision 1.3.0 of the agent protocol.
+
 ## [0.4.0]
 
 ### Added

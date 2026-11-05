@@ -323,6 +323,9 @@ func (daemon *daemon) tick(ctx context.Context) error {
 	daemon.tickUpgrade(ctx, options.Now())
 	daemon.tickReboot(options.Now())
 	if !daemon.unsupported {
+		daemon.sendRebootOutput(ctx, options.Now())
+	}
+	if !daemon.unsupported {
 		if err := daemon.sendResults(ctx); err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -28,6 +29,9 @@ const (
 	// rebootHelperTimeout bounds the root helper's reboot action, which
 	// only schedules the reboot.
 	rebootHelperTimeout = time.Minute
+	// rebootOutputPatience is how long the output of scheduling a reboot
+	// is sent again after a failure: the server goes down a minute after.
+	rebootOutputPatience = time.Minute
 )
 
 // Reboots is the daemon's side of the reboot command: the capability, the
@@ -73,6 +77,21 @@ type rebootWork struct {
 	waitUntil time.Time
 	checkAt   time.Time
 	verifyAt  time.Time
+	// output is the output of a scheduled reboot that still goes to the
+	// backend, nil for none.
+	output *rebootOutput
+}
+
+// rebootOutput is the output of scheduling a reboot, sent as live output
+// right away since the result only follows after the reboot (protocol:
+// Live output).
+type rebootOutput struct {
+	commandID string
+	text      []byte
+	offset    int64
+	at        time.Time
+	until     time.Time
+	backoff   time.Duration
 }
 
 // optOut reads the operator's opt-out; without one nothing is turned off.
@@ -280,6 +299,10 @@ func (daemon *daemon) rebootNow(record commandRecord) {
 	}
 	log.Printf("[commands] %s %s: the server reboots in one minute", record.Kind, record.ID)
 	daemon.reboot.verifyAt = request.RequestedAt.Add(rebootVerifyAfter)
+	if text != "" {
+		at := daemon.options.Now()
+		daemon.reboot.output = &rebootOutput{commandID: record.ID, text: []byte(text), at: at, until: at.Add(rebootOutputPatience), backoff: initialBackoff}
+	}
 	// Heartbeat right away: the backend measures from this contact whether
 	// the server came back in time (protocol: Reboots).
 	daemon.heartbeatAt = daemon.options.Now()
@@ -313,15 +336,98 @@ func (daemon *daemon) tickReboot(now time.Time) {
 	}
 }
 
-// rebootWakeAt is when tickReboot has work next, zero for none.
+// sendRebootOutput sends the output of scheduling a reboot once it is
+// due. A failed chunk is sent again until the server goes down; a
+// rejection (an older backend) drops it, the result still carries it.
+func (daemon *daemon) sendRebootOutput(ctx context.Context, now time.Time) {
+	pending := daemon.reboot.output
+	if pending == nil || now.Before(pending.at) {
+		return
+	}
+	if !now.Before(pending.until) {
+		daemon.reboot.output = nil
+		return
+	}
+	for pending.offset < int64(len(pending.text)) {
+		chunk, ok := outputChunk(pending.offset, pending.text[pending.offset:], true)
+		if !ok {
+			break
+		}
+		err := daemon.options.Client.ReportCommandOutput(ctx, pending.commandID, chunk)
+		if err == nil {
+			pending.offset += chunk.Length
+			pending.backoff = initialBackoff
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		kind, problem := classify(err)
+		if problem != nil && problem.Status == http.StatusConflict && problem.ExpectedOffset != nil {
+			// Continue where the backend is, on the next tick.
+			pending.offset = *problem.ExpectedOffset
+			pending.at = now
+			return
+		}
+		wait, _ := daemon.failure("send the output of "+pending.commandID, err, &pending.backoff, upgradeStreamRetry)
+		if kind == failureRejected {
+			daemon.reboot.output = nil
+			return
+		}
+		pending.at = now.Add(wait)
+		return
+	}
+	daemon.reboot.output = nil
+}
+
+// rebootWakeAt is when tickReboot or sendRebootOutput have work next,
+// zero for none.
 func (daemon *daemon) rebootWakeAt() time.Time {
 	work := &daemon.reboot
-	switch {
-	case work.waiting != nil && (work.verifyAt.IsZero() || work.checkAt.Before(work.verifyAt)):
-		return work.checkAt
-	default:
-		return work.verifyAt
+	at := work.verifyAt
+	if work.waiting != nil && (at.IsZero() || work.checkAt.Before(at)) {
+		at = work.checkAt
 	}
+	if work.output != nil && (at.IsZero() || work.output.at.Before(at)) {
+		at = work.output.at
+	}
+	return at
+}
+
+// rebootOutcome is the output of a finished reboot: that of scheduling it,
+// which went out as live output, and a line on how it ended.
+func rebootOutcome(request *rebootRequest, note string) (string, bool) {
+	text, truncated := execlog.Cap(request.Output + "# " + note + "\n")
+	return text, truncated || request.OutputTruncated
+}
+
+// rebootedNote tells when the server booted again, and how long after the
+// reboot was scheduled.
+func rebootedNote(request *rebootRequest, bootTime *time.Time) string {
+	if bootTime == nil {
+		return "The server rebooted: its boot ID changed"
+	}
+	note := "The server rebooted: it booted again at " + formatRebootTime(*bootTime)
+	if after := bootTime.Sub(request.RequestedAt); after > 0 {
+		note += ", " + after.Round(time.Second).String() + " after the reboot was scheduled"
+	}
+	return note
+}
+
+// notRebootedNote tells which boot the server still runs.
+func notRebootedNote(bootTime *time.Time, bootIDErr error) string {
+	switch {
+	case bootIDErr != nil:
+		return "The server did not reboot as far as can be told: its boot ID could not be read"
+	case bootTime == nil:
+		return "The server did not reboot: its boot ID is unchanged 10 minutes after the reboot was scheduled"
+	default:
+		return "The server did not reboot: it still runs the boot of " + formatRebootTime(*bootTime) + ", 10 minutes after the reboot was scheduled"
+	}
+}
+
+func formatRebootTime(at time.Time) string {
+	return at.UTC().Format("2006-01-02 15:04:05 UTC")
 }
 
 // checkReboots finishes handed-off reboots: a changed boot ID means the
@@ -360,14 +466,18 @@ func (daemon *daemon) checkReboots(now time.Time) {
 		switch {
 		case err == nil && bootID != request.BootID:
 			log.Printf("[reboot] %s: the server rebooted", record.ID)
-			daemon.finishCommandOutput(record.ID, CommandSucceeded, "", rebootData(RebootCodeRebooted, request.BootTime, daemon.bootTime()), request.Output, request.OutputTruncated)
+			bootTime := daemon.bootTime()
+			output, truncated := rebootOutcome(request, rebootedNote(request, bootTime))
+			daemon.finishCommandOutput(record.ID, CommandSucceeded, "", rebootData(RebootCodeRebooted, request.BootTime, bootTime), output, truncated)
 			daemon.removeRebootRequest()
 		case !now.Before(request.RequestedAt.Add(rebootVerifyAfter)):
 			detail := "the server did not reboot within 10 minutes; someone may have cancelled the shutdown"
 			if err != nil {
 				detail = "the server did not reboot within 10 minutes as far as the boot ID tells: " + err.Error()
 			}
-			daemon.finishCommandOutput(record.ID, CommandFailed, detail, rebootData(RebootCodeNotRebooted, request.BootTime, daemon.bootTime()), request.Output, request.OutputTruncated)
+			bootTime := daemon.bootTime()
+			output, truncated := rebootOutcome(request, notRebootedNote(bootTime, err))
+			daemon.finishCommandOutput(record.ID, CommandFailed, detail, rebootData(RebootCodeNotRebooted, request.BootTime, bootTime), output, truncated)
 			daemon.removeRebootRequest()
 		default:
 			at := request.RequestedAt.Add(rebootVerifyAfter)
