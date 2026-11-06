@@ -43,6 +43,9 @@ var DefaultIntervals = map[string]time.Duration{
 	"applications": time.Hour,
 	// cloud is also collected at agent start, like every enabled dataset.
 	"cloud": 24 * time.Hour,
+	// storage reads RAID and disk states from sysfs, which is cheap, so a
+	// failed disk is reported within minutes.
+	"storage": 5 * time.Minute,
 }
 
 // DefaultHeartbeatInterval is how often the agent checks in.

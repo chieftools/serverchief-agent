@@ -43,13 +43,13 @@ func TestRegistry(t *testing.T) {
 
 func TestDefaultRegistryDatasets(t *testing.T) {
 	registry := Default(&Host{FS: fstest.MapFS{}})
-	if names := registry.Names(); !reflect.DeepEqual(names, []string{"applications", "certificates", "cloud", "hardware", "network", "packages", "repositories", "resolvers", "system", "updates", "vhosts"}) {
+	if names := registry.Names(); !reflect.DeepEqual(names, []string{"applications", "certificates", "cloud", "hardware", "network", "packages", "repositories", "resolvers", "storage", "system", "updates", "vhosts"}) {
 		t.Fatalf("Names() = %v", names)
 	}
-	if names := registry.DefaultNames(); !reflect.DeepEqual(names, []string{"hardware", "network", "resolvers", "system"}) {
+	if names := registry.DefaultNames(); !reflect.DeepEqual(names, []string{"hardware", "network", "resolvers", "storage", "system"}) {
 		t.Fatalf("DefaultNames() = %v", names)
 	}
-	if selected, _ := registry.Select(nil); len(selected) != 4 {
+	if selected, _ := registry.Select(nil); len(selected) != 5 {
 		t.Fatalf("Select(nil) returned %d collectors; optional ones must be asked for", len(selected))
 	}
 	if selected, err := registry.Select([]string{"packages", "updates"}); err != nil || len(selected) != 2 {

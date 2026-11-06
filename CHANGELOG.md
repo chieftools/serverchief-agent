@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Added
+
+- The new `storage` dataset reports the health of software RAID (md) arrays and their members, and the state of NVMe and SCSI/SATA disks, every 5 minutes, so Server Chief can warn when an array is degraded or a disk fails. It reads sysfs only and needs no extra privileges or tools. A dead NVMe disk, which disappears from the `hardware` dataset's block devices, is still listed here.
+
 ### Fixed
 
 - Fixed Plesk sites losing their document root, PHP version and certificate for a round right after a reboot, and their certificates their Let's Encrypt manager, while the Plesk database was still starting. The agent no longer falls back to listing the sites by name at once when the database cannot be queried: the sites keep what was collected before, or, right after the agent starts, the sites, certificates and applications are collected again 10 to 15 minutes later. Only a database that fails for 30 minutes still reports the sites by name, and the agent now logs when it does.

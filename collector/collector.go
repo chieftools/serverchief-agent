@@ -68,6 +68,7 @@ func Default(host *Host) *Registry {
 	registry.MustRegister(NewHardware(host))
 	registry.MustRegister(NewNetwork(host))
 	registry.MustRegister(NewResolvers(host))
+	registry.MustRegister(NewStorage(host))
 	// packages and repositories share the package origins.
 	origins := NewOrigins(host)
 	registry.MustRegisterOptional(NewPackagesWithOrigins(host, origins))
