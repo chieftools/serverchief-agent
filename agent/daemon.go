@@ -780,9 +780,10 @@ func (daemon *daemon) cycle(ctx context.Context, names []string) (cycleOutcome, 
 			continue
 		}
 		dataset, err := collectDataset(ctx, instance, options.CollectTimeout)
-		if errors.Is(err, collector.ErrPackageManagerBusy) {
+		if errors.Is(err, collector.ErrPackageManagerBusy) || errors.Is(err, collector.ErrNotReady) {
 			// Not an error: the previous dataset (and any reported error)
-			// stands until the package manager is done.
+			// stands until the package manager is done or the service the
+			// collector reads from is up.
 			log.Printf("[collector] %s skipped: %v; keeping the previous dataset", name, err)
 			deferred[name] = err.Error()
 			continue

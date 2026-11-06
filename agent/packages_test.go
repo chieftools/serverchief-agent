@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -473,6 +474,34 @@ func TestBusyCollectorKeepsPreviousDataset(t *testing.T) {
 	}
 	if reported := daemon.options.Store.ReportedErrors(); !strings.Contains(reported["updates"], "no cache") {
 		t.Fatalf("busy collection cleared the reported error: %v", reported)
+	}
+	if want := now.Add(10 * time.Minute); !daemon.next["updates"].Equal(want) {
+		t.Fatalf("retry at %s, want %s", daemon.next["updates"], want)
+	}
+}
+
+func TestNotReadyCollectorKeepsPreviousDataset(t *testing.T) {
+	// The Plesk database right after a boot: what the backend has stands,
+	// without an error, and is collected again a little later.
+	server := newProtocolServer(t)
+	now := time.Date(2026, 11, 5, 22, 16, 0, 0, time.UTC)
+	daemon, _, _, updates := packagesDaemon(t, server, now, nil)
+	ctx := context.Background()
+	updates.set(map[string]int{"pending": 1}, nil)
+	if err := daemon.deliver(ctx, []string{"updates"}); err != nil {
+		t.Fatal(err)
+	}
+	hash := daemon.options.Store.Hash("updates")
+
+	updates.set(nil, fmt.Errorf("plesk: plesk db exited with status 1 (%w for 0s)", collector.ErrNotReady))
+	if err := daemon.deliver(ctx, []string{"updates"}); err != nil {
+		t.Fatal(err)
+	}
+	if sent := server.sent(); len(sent) != 1 {
+		t.Fatalf("a collector that is not ready sent %d more envelopes", len(sent)-1)
+	}
+	if reported := daemon.options.Store.ReportedErrors(); len(reported) != 0 || daemon.options.Store.Hash("updates") != hash {
+		t.Fatalf("reported %v, hash %s, want %s", reported, daemon.options.Store.Hash("updates"), hash)
 	}
 	if want := now.Add(10 * time.Minute); !daemon.next["updates"].Equal(want) {
 		t.Fatalf("retry at %s, want %s", daemon.next["updates"], want)

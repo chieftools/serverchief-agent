@@ -41,6 +41,12 @@ type ChangeDetector interface {
 	ChangeToken() string
 }
 
+// ErrNotReady means a service a collector reads from is not ready yet,
+// such as the Plesk database right after a boot. Like a busy package
+// manager, collection is skipped and the previous dataset is kept, so a
+// half-started server does not report its sites without their details.
+var ErrNotReady = errors.New("not ready yet")
+
 // Registry holds collectors by dataset name.
 type Registry struct {
 	mu         sync.RWMutex
