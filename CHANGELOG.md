@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.6.0]
+
 ### Added
 
 - The new `storage` dataset reports the health of software RAID (md) arrays and their members, and the state of NVMe and SCSI/SATA disks, every 5 minutes, so Server Chief can warn when an array is degraded or a disk fails. It reads sysfs only and needs no extra privileges or tools. A dead NVMe disk, which disappears from the `hardware` dataset's block devices, is still listed here.
@@ -158,7 +160,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.0
 [0.5.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.5.0
 [0.4.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.4.0
 [0.3.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.3.1
