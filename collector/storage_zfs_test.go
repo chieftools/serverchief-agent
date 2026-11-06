@@ -46,8 +46,8 @@ func TestParseZpoolStatusDegradedPool(t *testing.T) {
 	want := []ZFSVdev{
 		{Name: "mirror-0", Type: "mirror", Class: "data", State: "DEGRADED", Devices: []ZFSDevice{
 			{Device: "sda1", State: "ONLINE"},
-			{Device: "1234567890123456789", State: "UNAVAIL", Note: "was /dev/sdb1"},
-			{Device: "sdc1", State: "ONLINE", Note: "(resilvering)"},
+			{Device: "1234567890123456789", State: "UNAVAIL", Note: "was /dev/sdb1", Parent: "replacing-1"},
+			{Device: "sdc1", State: "ONLINE", Note: "(resilvering)", Parent: "replacing-1"},
 		}},
 		{Name: "raidz1-1", Type: "raidz1", Class: "data", State: "ONLINE", Devices: []ZFSDevice{
 			{Device: "sdd", State: "ONLINE", Checksum: 12},

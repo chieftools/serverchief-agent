@@ -17,6 +17,7 @@ type StorageInfo struct {
 	Arrays []RAIDArray   `json:"arrays"`
 	Pools  []ZFSPool     `json:"pools"`
 	Disks  []StorageDisk `json:"disks"`
+	SMART  SMARTStatus   `json:"smart"`
 }
 
 // RAIDArray is a Linux software RAID (md) array from /sys/block/md*/md.
@@ -28,14 +29,21 @@ type RAIDArray struct {
 	// "active". Others are inactive, readonly, suspended, clear and broken.
 	State     string `json:"state"`
 	RAIDDisks int    `json:"raid_disks"`
+	// Layout is the md layout number: for RAID 10 the near copies in the
+	// low byte, the far copies in the next byte and 0x10000 for the offset
+	// layout (258 is near=2); for RAID 5 and 6 the parity placement.
+	Layout int `json:"layout"`
 	// Degraded counts the member slots without a working device; 0 for
 	// levels without redundancy.
 	Degraded int `json:"degraded"`
 	// SyncAction is what the array is doing: idle, resync, recover (a
 	// rebuild onto a new device), check, repair, reshape or frozen.
-	SyncAction string       `json:"sync_action"`
-	SizeBytes  uint64       `json:"size_bytes"`
-	Members    []RAIDMember `json:"members"`
+	SyncAction string `json:"sync_action"`
+	// SyncDelayed is true while the sync waits for another array on the
+	// same disks to finish its own, as md rebuilds them one at a time.
+	SyncDelayed bool         `json:"sync_delayed"`
+	SizeBytes   uint64       `json:"size_bytes"`
+	Members     []RAIDMember `json:"members"`
 }
 
 // RAIDMember is a device of an md array.
@@ -66,6 +74,9 @@ type StorageDisk struct {
 	// created for SCSI.
 	State     string `json:"state"`
 	SizeBytes uint64 `json:"size_bytes"`
+	// SMART is what the disk reports about its own health, read at most
+	// hourly through the root helper; null when it could not be read.
+	SMART *DiskSMART `json:"smart"`
 }
 
 // Normalize sorts the unordered lists for canonical encoding.
@@ -80,7 +91,8 @@ func (info *StorageInfo) Normalize() {
 
 // Storage collects the storage dataset.
 type Storage struct {
-	host *Host
+	host  *Host
+	smart smartCache
 }
 
 func NewStorage(host *Host) *Storage { return &Storage{host: host} }
@@ -93,6 +105,11 @@ func (collector *Storage) Collect(ctx context.Context) (any, error) {
 		Arrays: host.readRAIDArrays(),
 		Pools:  host.readZFSPools(ctx),
 		Disks:  append(host.readNVMeDisks(), host.readSCSIDisks()...),
+	}
+	health := collector.smart.get(ctx, host)
+	info.SMART = SMARTStatus{Status: health.Status}
+	for index := range info.Disks {
+		info.Disks[index].SMART = health.Disks[info.Disks[index].Name]
 	}
 	info.Normalize()
 	return info, nil
@@ -116,14 +133,16 @@ func (host *Host) readRAIDArrays() []RAIDArray {
 			continue
 		}
 		array := RAIDArray{
-			Name:       name,
-			Level:      host.readOptional(base + "/level"),
-			State:      raidState(host.readOptional(base + "/array_state")),
-			RAIDDisks:  readInt(host.readOptional(base + "/raid_disks")),
-			Degraded:   readInt(host.readOptional(base + "/degraded")),
-			SyncAction: host.readOptional(base + "/sync_action"),
-			SizeBytes:  host.readSectors("/sys/block/" + name + "/size"),
-			Members:    []RAIDMember{},
+			Name:        name,
+			Level:       host.readOptional(base + "/level"),
+			State:       raidState(host.readOptional(base + "/array_state")),
+			RAIDDisks:   readInt(host.readOptional(base + "/raid_disks")),
+			Layout:      readInt(host.readOptional(base + "/layout")),
+			Degraded:    readInt(host.readOptional(base + "/degraded")),
+			SyncAction:  host.readOptional(base + "/sync_action"),
+			SyncDelayed: host.readOptional(base+"/sync_completed") == "delayed",
+			SizeBytes:   host.readSectors("/sys/block/" + name + "/size"),
+			Members:     []RAIDMember{},
 		}
 		if children, err := host.readDir(base); err == nil {
 			for _, child := range children {

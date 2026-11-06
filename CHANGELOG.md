@@ -11,10 +11,12 @@ release.
 
 ### Added
 
-- The `storage` dataset reports ZFS pools: their state, the layout of their mirrors, raidz and other vdevs with each device's state and read, write and checksum errors, the last scrub or resilver and whether files have permanent errors, and the pool's volumes (zvols) by name, so Server Chief can warn when a pool degrades. It runs `zpool status` as the unprivileged agent user. Disks also report their firmware version.
+- Disks report what they know about their own health through SMART: the overall verdict, NVMe critical warnings, spare capacity and wear, media errors, reallocated, pending and uncorrectable sectors, CRC errors and the result of the latest self-test. The root helper reads it hourly with `smartctl` from smartmontools when it is installed, on physical servers only; it never starts a self-test and leaves sleeping disks asleep. The package suggests smartmontools.
+- The `storage` dataset reports ZFS pools: their state, the layout of their mirrors, raidz and other vdevs with each device's state and read, write and checksum errors, the last scrub or resilver and whether files have permanent errors, and the pool's volumes (zvols) by name, so Server Chief can warn when a pool degrades. It runs `zpool status` as the unprivileged agent user. Disks also report their firmware version, RAID arrays their layout (which members mirror each other in RAID 10) and whether a rebuild waits for another array to finish and the devices of a ZFS vdev being replaced or covered by a spare which `replacing` or `spare` group they belong to.
 
 ### Fixed
 
+- Fixed Hetzner dedicated servers being reported as KVM virtual machines: Hetzner names itself the vendor of its dedicated servers too, only its cloud servers (vServer) are virtual.
 - Fixed file systems showing as read-only, and the agent's own directories and temporary directory showing as file systems, because the agent read the mounts of its own sandbox instead of the host's.
 - ZFS volumes (`zd*`) are reported as block devices of type `zvol` instead of `other`.
 

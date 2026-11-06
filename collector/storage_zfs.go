@@ -63,6 +63,10 @@ type ZFSDevice struct {
 	// Note is what zpool adds after the counters, such as
 	// "(resilvering)" or "was /dev/sdb1".
 	Note string `json:"note"`
+	// Parent names the intermediate vdev the device belongs to within its
+	// top-level vdev, such as replacing-1 or spare-0: together they fill
+	// one place of the vdev. Empty for a device directly in it.
+	Parent string `json:"parent"`
 }
 
 // ZFSVolume is a zvol: a block device backed by the pool, such as a
@@ -295,7 +299,9 @@ func parseZpoolConfig(config []string) []ZFSVdev {
 
 	vdevs := []ZFSVdev{}
 	class := "data"
+	ancestors := map[int]string{}
 	for index, entry := range parsed {
+		ancestors[entry.depth] = entry.name
 		if entry.depth == 0 {
 			if mapped, ok := zpoolClasses[entry.name]; ok && entry.state == "" {
 				class = mapped
@@ -313,8 +319,12 @@ func parseZpoolConfig(config []string) []ZFSVdev {
 			continue
 		}
 		if !hasChildren && len(vdevs) > 0 {
+			device := zfsDevice(entry)
+			if entry.depth > 2 {
+				device.Parent = ancestors[entry.depth-1]
+			}
 			last := &vdevs[len(vdevs)-1]
-			last.Devices = append(last.Devices, zfsDevice(entry))
+			last.Devices = append(last.Devices, device)
 		}
 	}
 	return vdevs

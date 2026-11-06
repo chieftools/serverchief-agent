@@ -45,6 +45,10 @@ const (
 	// daemon cannot: modules such as ModSecurity open their log files for
 	// writing while the configuration is read.
 	ActionApacheVHosts = "apache-vhosts"
+	// ActionDiskHealth reads the SMART data of the physical disks with
+	// smartctl, which needs root. The helper picks the disks itself and
+	// skips virtual machines and containers; it never starts a self-test.
+	ActionDiskHealth = "disk-health"
 	// ActionStartAgentUpdate starts the update helper for the update
 	// request the daemon wrote to its state directory.
 	ActionStartAgentUpdate = "start-agent-update"

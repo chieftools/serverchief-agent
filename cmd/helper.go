@@ -84,6 +84,16 @@ func helperActions() helper.Actions {
 				return helper.Result{Stdout: output}
 			},
 		},
+		helper.ActionDiskHealth: {
+			Timeout: 5 * time.Minute,
+			Run: func(ctx context.Context, _ map[string]string) helper.Result {
+				data, err := json.Marshal(collector.NewHost("/").FetchDiskHealth(ctx))
+				if err != nil {
+					return helper.Result{Error: err.Error()}
+				}
+				return helper.Result{Data: data}
+			},
+		},
 		helper.ActionStartAgentUpdate: {
 			Timeout: time.Minute,
 			Run: func(ctx context.Context, _ map[string]string) helper.Result {

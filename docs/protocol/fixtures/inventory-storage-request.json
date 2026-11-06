@@ -2,12 +2,13 @@
   "collected_at": "2026-11-06T12:00:00Z",
   "datasets": {
     "storage": {
-      "hash": "f849a90bc88dee1913d9782b422d7e6169f98d6a825fa2de84ab37e01aa85ef5",
+      "hash": "07037f1efabb6a67a1fe3d08d5498aa979072b96eba320417c8caef7c63f2916",
       "mode": "full",
       "payload": {
         "arrays": [
           {
             "degraded": 1,
+            "layout": 0,
             "level": "raid1",
             "members": [
               {
@@ -30,10 +31,12 @@
             "raid_disks": 2,
             "size_bytes": 33268170752,
             "state": "active",
-            "sync_action": "idle"
+            "sync_action": "idle",
+            "sync_delayed": false
           },
           {
             "degraded": 1,
+            "layout": 258,
             "level": "raid10",
             "members": [
               {
@@ -56,7 +59,8 @@
             "raid_disks": 2,
             "size_bytes": 1978887307264,
             "state": "active",
-            "sync_action": "idle"
+            "sync_action": "idle",
+            "sync_delayed": false
           }
         ],
         "disks": [
@@ -67,7 +71,8 @@
             "size_bytes": 0,
             "state": "dead",
             "type": "nvme",
-            "firmware": "GXA7801Q"
+            "firmware": "GXA7801Q",
+            "smart": null
           },
           {
             "model": "SAMSUNG MZVL21T0HCLR-00B00",
@@ -76,7 +81,22 @@
             "size_bytes": 1024209543168,
             "state": "live",
             "type": "nvme",
-            "firmware": "GXA7801Q"
+            "firmware": "GXA7801Q",
+            "smart": {
+              "available_spare": 100,
+              "available_spare_threshold": 10,
+              "crc_errors": null,
+              "critical_warning": 0,
+              "error_log_entries": 0,
+              "media_errors": 0,
+              "offline_uncorrectable": null,
+              "passed": true,
+              "pending_sectors": null,
+              "percentage_used": 4,
+              "reallocated_sectors": null,
+              "reported_uncorrectable": null,
+              "self_test_passed": null
+            }
           },
           {
             "firmware": "GDC5602Q",
@@ -85,7 +105,22 @@
             "serial": "S000EXAMPLE0003",
             "size_bytes": 3840755982336,
             "state": "live",
-            "type": "nvme"
+            "type": "nvme",
+            "smart": {
+              "available_spare": 100,
+              "available_spare_threshold": 10,
+              "crc_errors": null,
+              "critical_warning": 0,
+              "error_log_entries": 0,
+              "media_errors": 0,
+              "offline_uncorrectable": null,
+              "passed": true,
+              "pending_sectors": null,
+              "percentage_used": 11,
+              "reallocated_sectors": null,
+              "reported_uncorrectable": null,
+              "self_test_passed": null
+            }
           },
           {
             "firmware": "GDC5602Q",
@@ -94,7 +129,22 @@
             "serial": "S000EXAMPLE0004",
             "size_bytes": 3840755982336,
             "state": "live",
-            "type": "nvme"
+            "type": "nvme",
+            "smart": {
+              "available_spare": 100,
+              "available_spare_threshold": 10,
+              "crc_errors": null,
+              "critical_warning": 0,
+              "error_log_entries": 0,
+              "media_errors": 0,
+              "offline_uncorrectable": null,
+              "passed": true,
+              "pending_sectors": null,
+              "percentage_used": 12,
+              "reallocated_sectors": null,
+              "reported_uncorrectable": null,
+              "self_test_passed": null
+            }
           }
         ],
         "pools": [
@@ -117,6 +167,7 @@
                     "checksum": 0,
                     "device": "nvme2n1p3",
                     "note": "",
+                    "parent": "",
                     "read": 0,
                     "state": "ONLINE",
                     "write": 0
@@ -125,6 +176,7 @@
                     "checksum": 0,
                     "device": "nvme3n1p3",
                     "note": "",
+                    "parent": "",
                     "read": 0,
                     "state": "ONLINE",
                     "write": 0
@@ -145,7 +197,10 @@
               }
             ]
           }
-        ]
+        ],
+        "smart": {
+          "status": "read"
+        }
       }
     }
   },

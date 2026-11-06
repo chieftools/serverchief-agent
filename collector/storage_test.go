@@ -18,6 +18,7 @@ func degradedStorageHost() *Host {
 		"sys/block/md2/md/level":               sysfsFile("raid10"),
 		"sys/block/md2/md/array_state":         sysfsFile("clean"),
 		"sys/block/md2/md/raid_disks":          sysfsFile("4"),
+		"sys/block/md2/md/layout":              sysfsFile("258"),
 		"sys/block/md2/md/degraded":            sysfsFile("1"),
 		"sys/block/md2/md/sync_action":         sysfsFile("idle"),
 		"sys/block/md2/md/metadata_version":    sysfsFile("1.2"),
@@ -73,7 +74,7 @@ func TestStorageCollect(t *testing.T) {
 				Members: []RAIDMember{{Device: "nvme1n1p2", Slot: &zero, State: []string{"in_sync"}}},
 			},
 			{
-				Name: "md2", Level: "raid10", State: "active", RAIDDisks: 4, Degraded: 1, SyncAction: "idle", SizeBytes: 3865014272 * 512,
+				Name: "md2", Level: "raid10", State: "active", RAIDDisks: 4, Layout: 258, Degraded: 1, SyncAction: "idle", SizeBytes: 3865014272 * 512,
 				Members: []RAIDMember{
 					{Device: "nvme0n1p4", Slot: nil, State: []string{"faulty", "write_error"}},
 					{Device: "nvme1n1p4", Slot: &one, State: []string{"in_sync"}},
@@ -87,9 +88,31 @@ func TestStorageCollect(t *testing.T) {
 			{Name: "nvme2", Type: "nvme", Model: "SAMSUNG MZVL21T0HCLR-00B00", Serial: "S676NU0W639503", State: "dead"},
 			{Name: "sda", Type: "scsi", Model: "ST4000NM0035-1V4", State: "offline", SizeBytes: 7814037168 * 512},
 		},
+		SMART: SMARTStatus{Status: SMARTNotInstalled},
 	}
 	if !reflect.DeepEqual(info, want) {
 		t.Errorf("Collect() =\n%+v\nwant\n%+v", info, want)
+	}
+}
+
+// TestStorageCollectQueuedRebuild: md rebuilds arrays on the same disks one
+// at a time. While md2 waits for md0, the new member already has its slot,
+// flagged spare instead of in_sync, and sync_completed reads "delayed".
+func TestStorageCollectQueuedRebuild(t *testing.T) {
+	host := &Host{FS: fstest.MapFS{
+		"sys/block/md2/md/level":               sysfsFile("raid10"),
+		"sys/block/md2/md/array_state":         sysfsFile("active"),
+		"sys/block/md2/md/raid_disks":          sysfsFile("4"),
+		"sys/block/md2/md/degraded":            sysfsFile("1"),
+		"sys/block/md2/md/sync_action":         sysfsFile("recover"),
+		"sys/block/md2/md/sync_completed":      sysfsFile("delayed"),
+		"sys/block/md2/md/dev-nvme0n1p4/slot":  sysfsFile("0"),
+		"sys/block/md2/md/dev-nvme0n1p4/state": sysfsFile("spare"),
+	}}
+	arrays := host.readRAIDArrays()
+	zero := 0
+	if len(arrays) != 1 || !arrays[0].SyncDelayed || arrays[0].SyncAction != "recover" || !reflect.DeepEqual(arrays[0].Members, []RAIDMember{{Device: "nvme0n1p4", Slot: &zero, State: []string{"spare"}}}) {
+		t.Errorf("readRAIDArrays() = %+v", arrays)
 	}
 }
 

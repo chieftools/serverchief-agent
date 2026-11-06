@@ -1,0 +1,181 @@
+{
+  "json_format_version": [
+    1,
+    0
+  ],
+  "smartctl": {
+    "version": [
+      7,
+      4
+    ],
+    "argv": [
+      "smartctl",
+      "-j",
+      "-H",
+      "-A",
+      "-l",
+      "error",
+      "-l",
+      "selftest",
+      "-n",
+      "standby",
+      "/dev/sda"
+    ],
+    "exit_status": 192
+  },
+  "device": {
+    "name": "/dev/sda",
+    "info_name": "/dev/sda [SAT]",
+    "type": "sat",
+    "protocol": "ATA"
+  },
+  "power_mode": "ACTIVE or IDLE",
+  "smart_status": {
+    "passed": true
+  },
+  "ata_smart_attributes": {
+    "revision": 10,
+    "table": [
+      {
+        "id": 5,
+        "name": "Reallocated_Sector_Ct",
+        "value": 100,
+        "worst": 100,
+        "thresh": 10,
+        "when_failed": "",
+        "flags": {
+          "value": 50,
+          "string": "PO--CK "
+        },
+        "raw": {
+          "value": 8,
+          "string": "8"
+        }
+      },
+      {
+        "id": 9,
+        "name": "Power_On_Hours",
+        "value": 61,
+        "worst": 61,
+        "thresh": 0,
+        "when_failed": "",
+        "flags": {
+          "value": 50,
+          "string": "PO--CK "
+        },
+        "raw": {
+          "value": 34567,
+          "string": "34567"
+        }
+      },
+      {
+        "id": 187,
+        "name": "Reported_Uncorrect",
+        "value": 99,
+        "worst": 99,
+        "thresh": 0,
+        "when_failed": "",
+        "flags": {
+          "value": 50,
+          "string": "PO--CK "
+        },
+        "raw": {
+          "value": 1,
+          "string": "1"
+        }
+      },
+      {
+        "id": 194,
+        "name": "Temperature_Celsius",
+        "value": 64,
+        "worst": 50,
+        "thresh": 0,
+        "when_failed": "",
+        "flags": {
+          "value": 50,
+          "string": "PO--CK "
+        },
+        "raw": {
+          "value": 36,
+          "string": "36"
+        }
+      },
+      {
+        "id": 197,
+        "name": "Current_Pending_Sector",
+        "value": 100,
+        "worst": 100,
+        "thresh": 0,
+        "when_failed": "",
+        "flags": {
+          "value": 50,
+          "string": "PO--CK "
+        },
+        "raw": {
+          "value": 2,
+          "string": "2"
+        }
+      },
+      {
+        "id": 198,
+        "name": "Offline_Uncorrectable",
+        "value": 100,
+        "worst": 100,
+        "thresh": 0,
+        "when_failed": "",
+        "flags": {
+          "value": 50,
+          "string": "PO--CK "
+        },
+        "raw": {
+          "value": 0,
+          "string": "0"
+        }
+      },
+      {
+        "id": 199,
+        "name": "UDMA_CRC_Error_Count",
+        "value": 200,
+        "worst": 200,
+        "thresh": 0,
+        "when_failed": "",
+        "flags": {
+          "value": 50,
+          "string": "PO--CK "
+        },
+        "raw": {
+          "value": 3,
+          "string": "3"
+        }
+      }
+    ]
+  },
+  "ata_smart_error_log": {
+    "summary": {
+      "revision": 1,
+      "count": 12,
+      "logged_count": 5
+    }
+  },
+  "ata_smart_self_test_log": {
+    "standard": {
+      "revision": 1,
+      "table": [
+        {
+          "type": {
+            "value": 2,
+            "string": "Extended offline"
+          },
+          "status": {
+            "value": 121,
+            "string": "Completed: read failure",
+            "remaining_percent": 10,
+            "passed": false
+          },
+          "lifetime_hours": 34500
+        }
+      ],
+      "count": 1
+    }
+  }
+}

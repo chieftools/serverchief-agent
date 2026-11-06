@@ -1,0 +1,36 @@
+{
+  "json_format_version": [
+    1,
+    0
+  ],
+  "smartctl": {
+    "version": [
+      7,
+      4
+    ],
+    "argv": [
+      "smartctl",
+      "-j",
+      "-H",
+      "-A",
+      "-l",
+      "error",
+      "-l",
+      "selftest",
+      "-n",
+      "standby",
+      "/dev/nvme0"
+    ],
+    "messages": [
+      {
+        "string": "Smartctl open device: /dev/nvme0 failed: Resource temporarily unavailable",
+        "severity": "error"
+      }
+    ],
+    "exit_status": 2
+  },
+  "local_time": {
+    "time_t": 1793963326,
+    "asctime": "Fri Nov  6 12:08:46 2026 CET"
+  }
+}

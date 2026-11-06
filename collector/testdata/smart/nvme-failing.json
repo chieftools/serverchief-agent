@@ -1,0 +1,94 @@
+{
+  "json_format_version": [
+    1,
+    0
+  ],
+  "smartctl": {
+    "version": [
+      7,
+      3
+    ],
+    "svn_revision": "5338",
+    "platform_info": "x86_64-linux-6.8.12-15-pve",
+    "build_info": "(local build)",
+    "argv": [
+      "smartctl",
+      "-j",
+      "-H",
+      "-A",
+      "-l",
+      "error",
+      "-l",
+      "selftest",
+      "-n",
+      "standby",
+      "/dev/nvme0"
+    ],
+    "exit_status": 8
+  },
+  "local_time": {
+    "time_t": 1793967358,
+    "asctime": "Fri Nov  6 13:15:58 2026 CET"
+  },
+  "device": {
+    "name": "/dev/nvme0",
+    "info_name": "/dev/nvme0",
+    "type": "nvme",
+    "protocol": "NVMe"
+  },
+  "smart_status": {
+    "passed": false,
+    "nvme": {
+      "value": 5
+    }
+  },
+  "nvme_smart_health_information_log": {
+    "critical_warning": 5,
+    "temperature": 37,
+    "available_spare": 4,
+    "available_spare_threshold": 10,
+    "percentage_used": 103,
+    "data_units_read": 369959878,
+    "data_units_written": 3776484897,
+    "host_reads": 20353407240,
+    "host_writes": 47663763870,
+    "controller_busy_time": 31320,
+    "power_cycles": 10,
+    "power_on_hours": 29280,
+    "unsafe_shutdowns": 4,
+    "media_errors": 17,
+    "num_err_log_entries": 240,
+    "warning_temp_time": 0,
+    "critical_comp_time": 0,
+    "temperature_sensors": [
+      37,
+      48
+    ]
+  },
+  "temperature": {
+    "current": 37
+  },
+  "power_cycle_count": 10,
+  "power_on_time": {
+    "hours": 29280
+  },
+  "nvme_self_test_log": {
+    "current_self_test_operation": {
+      "value": 0,
+      "string": "No self-test in progress"
+    },
+    "table": [
+      {
+        "self_test_code": {
+          "value": 1,
+          "string": "Short"
+        },
+        "self_test_result": {
+          "value": 7,
+          "string": "Completed: failed segments"
+        },
+        "power_on_hours": 29270
+      }
+    ]
+  }
+}

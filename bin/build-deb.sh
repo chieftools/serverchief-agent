@@ -77,6 +77,7 @@ Architecture: ${ARCH}
 Maintainer: ${MAINTAINER}
 Homepage: https://server.chief.app
 Recommends: ca-certificates
+Suggests: smartmontools
 Description: ${DESCRIPTION}
  Inventories the operating system, hardware, network, packages, websites and
  certificates of this server and reports changes to Server Chief. Supports
