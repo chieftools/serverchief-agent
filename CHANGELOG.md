@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.6.1]
+
 ### Added
 
 - Disks report what they know about their own health through SMART: the overall verdict, NVMe critical warnings, spare capacity and wear, media errors, reallocated, pending and uncorrectable sectors, CRC errors and the result of the latest self-test. The root helper reads it hourly with `smartctl` from smartmontools when it is installed, on physical servers only; it never starts a self-test and leaves sleeping disks asleep. The package suggests smartmontools.
@@ -171,7 +173,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.1
 [0.6.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.0
 [0.5.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.5.0
 [0.4.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.4.0
