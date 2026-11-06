@@ -93,7 +93,7 @@ jobs:
             echo "::group::${image}"
             docker run --rm -v "${PWD}/serverchief-linux-amd64:/usr/bin/serverchief:ro" "${image}" \
               /usr/bin/serverchief collect > "collect.json"
-            python3 -c 'import json,sys; e=json.load(open("collect.json")); assert set(e["datasets"]) == {"system","hardware","network","resolvers"}, e; print(e["datasets"]["system"]["payload"]["os"])'
+            python3 -c 'import json,sys; e=json.load(open("collect.json")); assert set(e["datasets"]) == {"system","hardware","network","resolvers","storage"}, e; assert e["datasets"]["storage"]["payload"]["smart"]["status"] == "virtual", e["datasets"]["storage"]; print(e["datasets"]["system"]["payload"]["os"])'
             echo "::endgroup::"
           done
 
