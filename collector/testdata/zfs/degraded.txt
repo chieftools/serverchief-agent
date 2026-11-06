@@ -1,0 +1,42 @@
+  pool: tank
+ state: DEGRADED
+status: One or more devices could not be used because the label is missing or
+	invalid.  Sufficient replicas exist for the pool to continue
+	functioning in a degraded state.
+action: Replace the device using 'zpool replace'.
+   see: https://openzfs.github.io/openzfs-docs/msg/ZFS-8000-4J
+  scan: resilver in progress since Fri Nov  6 10:00:00 2026
+	1319413953331 / 3012642877440 scanned at 1181116006/s, 644245094400 / 3012642877440 issued at 524288000/s
+	322122547200 resilvered, 21.38% done, 01:15:20 to go
+config:
+
+	NAME                      STATE     READ WRITE CKSUM
+	tank                      DEGRADED     0     0     0
+	  mirror-0                DEGRADED     0     0     0
+	    /dev/sda1             ONLINE       0     0     0
+	    replacing-1           DEGRADED     0     0     0
+	      1234567890123456789 UNAVAIL      0     0     0  was /dev/sdb1
+	      /dev/sdc1           ONLINE       0     0     0  (resilvering)
+	  raidz1-1                ONLINE       0     0     0
+	    /dev/sdd              ONLINE       0     0    12
+	    /dev/sde              ONLINE       3     0     0
+	    /dev/sdf              ONLINE       0     0     0
+	logs
+	  /dev/nvme0n1p1          ONLINE       0     0     0
+	cache
+	  /dev/nvme0n1p2          ONLINE       0     0     0
+	spares
+	  /dev/sdg                AVAIL
+
+errors: 2 data errors, use '-v' for a list
+
+  pool: backup
+ state: ONLINE
+  scan: none requested
+config:
+
+	NAME        STATE     READ WRITE CKSUM
+	backup      ONLINE       0     0     0
+	  /dev/sdh  ONLINE       0     0     0
+
+errors: No known data errors

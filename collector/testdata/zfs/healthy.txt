@@ -1,0 +1,38 @@
+  pool: rpool
+ state: ONLINE
+status: Some supported and requested features are not enabled on the pool.
+	The pool can still be used, but some features are unavailable.
+action: Enable all features using 'zpool upgrade'. Once this is done,
+	the pool may no longer be accessible by software that does not support
+	the features. See zpool-features(7) for details.
+  scan: scrub repaired 0B in 01:17:18 with 0 errors on Sun Oct 11 01:41:19 2026
+config:
+
+	NAME                STATE     READ WRITE CKSUM
+	rpool               ONLINE       0     0     0
+	  mirror-0          ONLINE       0     0     0
+	    /dev/nvme0n1p3  ONLINE       0     0     0
+	    /dev/nvme2n1p3  ONLINE       0     0     0
+	  mirror-1          ONLINE       0     0     0
+	    /dev/nvme1n1p3  ONLINE       0     0     0
+	    /dev/nvme3n1p3  ONLINE       0     0     0
+
+errors: No known data errors
+
+  pool: rpool2
+ state: ONLINE
+status: Some supported and requested features are not enabled on the pool.
+	The pool can still be used, but some features are unavailable.
+action: Enable all features using 'zpool upgrade'. Once this is done,
+	the pool may no longer be accessible by software that does not support
+	the features. See zpool-features(7) for details.
+  scan: scrub repaired 0B in 02:19:53 with 0 errors on Sun Oct 11 02:43:55 2026
+config:
+
+	NAME                STATE     READ WRITE CKSUM
+	rpool2              ONLINE       0     0     0
+	  mirror-0          ONLINE       0     0     0
+	    /dev/nvme4n1p1  ONLINE       0     0     0
+	    /dev/nvme5n1p1  ONLINE       0     0     0
+
+errors: No known data errors

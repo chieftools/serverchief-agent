@@ -9,6 +9,15 @@ release.
 
 ## [Unreleased]
 
+### Added
+
+- The `storage` dataset reports ZFS pools: their state, the layout of their mirrors, raidz and other vdevs with each device's state and read, write and checksum errors, the last scrub or resilver and whether files have permanent errors, and the pool's volumes (zvols) by name, so Server Chief can warn when a pool degrades. It runs `zpool status` as the unprivileged agent user. Disks also report their firmware version.
+
+### Fixed
+
+- Fixed file systems showing as read-only, and the agent's own directories and temporary directory showing as file systems, because the agent read the mounts of its own sandbox instead of the host's.
+- ZFS volumes (`zd*`) are reported as block devices of type `zvol` instead of `other`.
+
 ## [0.6.0]
 
 ### Added

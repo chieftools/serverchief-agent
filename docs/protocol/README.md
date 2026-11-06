@@ -165,7 +165,7 @@ The agent advances its acknowledged hashes **only** for datasets listed in `acce
 | Name | Mode | Key (delta datasets) | Server-side denormalisation onto `servers` |
 |---|---|---|---|
 | `system` | full | — | `hostname`, `fqdn`, `os_family`, `os_id`, `os_name`, `os_version` (`version_full`), `os_codename`, `kernel_release`, `arch`, `virtualization` (`role/technology`; in a container `lxcfs` tells whether /proc shows the container's own memory, CPU and load rather than the host's), `boot_time`, `php_builds` (PHP installations no package owns, `prefix` and `version` read from their `php-config`) |
-| `hardware` | full | — | `cpu_model`, `cpu_cores` (physical, falling back to logical), `cpu_threads`, `memory_bytes`, `swap_bytes`, `disk_bytes` (sum of non-removable block devices) |
+| `hardware` | full | — | `cpu_model`, `cpu_cores` (physical, falling back to logical), `cpu_threads`, `memory_bytes`, `swap_bytes`, `disk_bytes` (sum of non-removable physical disks, without RAID arrays, device-mapper volumes and zvols) |
 | `storage` | full | — | `storage_health` (`healthy`, `degraded` or `failed`, see the app) and `storage_unhealthy_since` |
 | `network` | full | — | `server_addresses` rows: interface, address, prefix, family 4/6, scope. Primary public IPv4/IPv6 go on `servers.public_ipv4` / `public_ipv6`. |
 | `resolvers` | full | — | `nameservers` JSON column |

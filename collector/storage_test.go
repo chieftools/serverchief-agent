@@ -80,6 +80,7 @@ func TestStorageCollect(t *testing.T) {
 				},
 			},
 		},
+		Pools: []ZFSPool{},
 		Disks: []StorageDisk{
 			{Name: "nvme0n1", Type: "nvme", Model: "SAMSUNG MZVL21T0HCLR-00B00", Serial: "S676NL0W376092", State: "dead", SizeBytes: 0},
 			{Name: "nvme1n1", Type: "nvme", Model: "SAMSUNG MZVL21T0HCLR-00B00", Serial: "S676NX0W218643", State: "live", SizeBytes: 2000409264 * 512},

@@ -9,11 +9,13 @@ import (
 )
 
 // StorageInfo is the payload of the storage dataset: the health of software
-// RAID arrays and of the disks themselves, as the kernel reports it. Like
+// RAID arrays, ZFS pools and the disks themselves, as the kernel and zpool
+// report it. Like
 // every dataset it only holds values that stay put while nothing changes,
 // so a rebuild's progress and the md "clean"/"active" flip are left out.
 type StorageInfo struct {
 	Arrays []RAIDArray   `json:"arrays"`
+	Pools  []ZFSPool     `json:"pools"`
 	Disks  []StorageDisk `json:"disks"`
 }
 
@@ -57,6 +59,8 @@ type StorageDisk struct {
 	Type   string `json:"type"`
 	Model  string `json:"model"`
 	Serial string `json:"serial"`
+	// Firmware is the firmware revision of the drive.
+	Firmware string `json:"firmware"`
 	// State is the kernel's own word: live, dead, resetting, connecting or
 	// deleting for NVMe; running, offline, transport-offline, blocked or
 	// created for SCSI.
@@ -70,6 +74,7 @@ func (info *StorageInfo) Normalize() {
 	for index := range info.Arrays {
 		slices.SortFunc(info.Arrays[index].Members, func(a, b RAIDMember) int { return strings.Compare(a.Device, b.Device) })
 	}
+	slices.SortFunc(info.Pools, func(a, b ZFSPool) int { return strings.Compare(a.Name, b.Name) })
 	slices.SortFunc(info.Disks, func(a, b StorageDisk) int { return strings.Compare(a.Name, b.Name) })
 }
 
@@ -82,10 +87,11 @@ func NewStorage(host *Host) *Storage { return &Storage{host: host} }
 
 func (*Storage) Name() string { return "storage" }
 
-func (collector *Storage) Collect(context.Context) (any, error) {
+func (collector *Storage) Collect(ctx context.Context) (any, error) {
 	host := collector.host
 	info := &StorageInfo{
 		Arrays: host.readRAIDArrays(),
+		Pools:  host.readZFSPools(ctx),
 		Disks:  append(host.readNVMeDisks(), host.readSCSIDisks()...),
 	}
 	info.Normalize()
@@ -182,10 +188,11 @@ func (host *Host) readNVMeDisks() []StorageDisk {
 			continue
 		}
 		disk := StorageDisk{
-			Type:   "nvme",
-			Model:  host.readOptional(base + "/model"),
-			Serial: host.readOptional(base + "/serial"),
-			State:  state,
+			Type:     "nvme",
+			Model:    host.readOptional(base + "/model"),
+			Serial:   host.readOptional(base + "/serial"),
+			Firmware: host.readOptional(base + "/firmware_rev"),
+			State:    state,
 		}
 		namespaces := []string{}
 		if children, err := host.readDir(base); err == nil {
@@ -232,6 +239,7 @@ func (host *Host) readSCSIDisks() []StorageDisk {
 			Name:      name,
 			Type:      "scsi",
 			Model:     host.readOptional(base + "/device/model"),
+			Firmware:  host.readOptional(base + "/device/rev"),
 			State:     state,
 			SizeBytes: host.readSectors(base + "/size"),
 		})

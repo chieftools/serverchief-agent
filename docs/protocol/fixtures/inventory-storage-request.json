@@ -2,7 +2,7 @@
   "collected_at": "2026-11-06T12:00:00Z",
   "datasets": {
     "storage": {
-      "hash": "0b6fddd369bf7b1d9370a606f1156929303b7bfb489bffde0f3c4c9b0252746f",
+      "hash": "f849a90bc88dee1913d9782b422d7e6169f98d6a825fa2de84ab37e01aa85ef5",
       "mode": "full",
       "payload": {
         "arrays": [
@@ -66,7 +66,8 @@
             "serial": "S000EXAMPLE0001",
             "size_bytes": 0,
             "state": "dead",
-            "type": "nvme"
+            "type": "nvme",
+            "firmware": "GXA7801Q"
           },
           {
             "model": "SAMSUNG MZVL21T0HCLR-00B00",
@@ -74,7 +75,75 @@
             "serial": "S000EXAMPLE0002",
             "size_bytes": 1024209543168,
             "state": "live",
+            "type": "nvme",
+            "firmware": "GXA7801Q"
+          },
+          {
+            "firmware": "GDC5602Q",
+            "model": "SAMSUNG MZQL23T8HCLS-00A07",
+            "name": "nvme2n1",
+            "serial": "S000EXAMPLE0003",
+            "size_bytes": 3840755982336,
+            "state": "live",
             "type": "nvme"
+          },
+          {
+            "firmware": "GDC5602Q",
+            "model": "SAMSUNG MZQL23T8HCLS-00A07",
+            "name": "nvme3n1",
+            "serial": "S000EXAMPLE0004",
+            "size_bytes": 3840755982336,
+            "state": "live",
+            "type": "nvme"
+          }
+        ],
+        "pools": [
+          {
+            "data_errors": 0,
+            "name": "rpool",
+            "scan": {
+              "ended_at": "2026-10-11T00:41:19Z",
+              "errors": 0,
+              "function": "scrub",
+              "state": "finished"
+            },
+            "state": "ONLINE",
+            "vdevs": [
+              {
+                "checksum": 0,
+                "class": "data",
+                "devices": [
+                  {
+                    "checksum": 0,
+                    "device": "nvme2n1p3",
+                    "note": "",
+                    "read": 0,
+                    "state": "ONLINE",
+                    "write": 0
+                  },
+                  {
+                    "checksum": 0,
+                    "device": "nvme3n1p3",
+                    "note": "",
+                    "read": 0,
+                    "state": "ONLINE",
+                    "write": 0
+                  }
+                ],
+                "name": "mirror-0",
+                "read": 0,
+                "state": "ONLINE",
+                "type": "mirror",
+                "write": 0
+              }
+            ],
+            "volumes": [
+              {
+                "device": "zd0",
+                "name": "rpool/data/vm-100-disk-0",
+                "size_bytes": 68719476736
+              }
+            ]
           }
         ]
       }
