@@ -322,6 +322,16 @@ func TestVirtualizationDetection(t *testing.T) {
 			want: Virtualization{Role: "vm", Technology: "kvm", Vendor: "Hetzner", Product: "vServer"},
 		},
 		{
+			name: "hetzner dedicated server is bare metal",
+			fsys: fstest.MapFS{
+				"sys/class/dmi/id/sys_vendor":   &fstest.MapFile{Data: []byte("Hetzner\n")},
+				"sys/class/dmi/id/product_name": &fstest.MapFile{Data: []byte("\n")},
+				"sys/class/dmi/id/board_vendor": &fstest.MapFile{Data: []byte("ASRockRack\n")},
+				"sys/class/dmi/id/bios_vendor":  &fstest.MapFile{Data: []byte("American Megatrends International, LLC.\n")},
+			},
+			want: Virtualization{Role: "none", Vendor: "Hetzner"},
+		},
+		{
 			name: "xen pv guest without dmi",
 			fsys: fstest.MapFS{"proc/xen/capabilities": &fstest.MapFile{Data: []byte("\n")}},
 			want: Virtualization{Role: "vm", Technology: "xen"},

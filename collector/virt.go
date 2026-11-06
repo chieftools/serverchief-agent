@@ -45,7 +45,6 @@ var dmiRules = []dmiRule{
 	{"google compute engine", "google"},
 	{"openstack", "kvm"},
 	{"digitalocean", "kvm"},
-	{"hetzner", "kvm"},
 	{"apple virtualization", "apple"},
 }
 
@@ -138,6 +137,11 @@ func (host *Host) detectVM(vendor, product string, cpuFlags []string) string {
 	// hardware is also made by Microsoft, so require the product name.
 	if dmi[0] == "microsoft corporation" && dmi[1] == "virtual machine" {
 		return "hyperv"
+	}
+	// Hetzner is the vendor of its dedicated servers too, which run on real
+	// boards (ASRockRack, Supermicro); only its cloud servers are vServers.
+	if dmi[0] == "hetzner" && dmi[1] == "vserver" {
+		return "kvm"
 	}
 	for _, value := range dmi {
 		if value == "" {
