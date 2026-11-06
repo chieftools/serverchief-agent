@@ -166,6 +166,7 @@ The agent advances its acknowledged hashes **only** for datasets listed in `acce
 |---|---|---|---|
 | `system` | full | — | `hostname`, `fqdn`, `os_family`, `os_id`, `os_name`, `os_version` (`version_full`), `os_codename`, `kernel_release`, `arch`, `virtualization` (`role/technology`; in a container `lxcfs` tells whether /proc shows the container's own memory, CPU and load rather than the host's), `boot_time`, `php_builds` (PHP installations no package owns, `prefix` and `version` read from their `php-config`) |
 | `hardware` | full | — | `cpu_model`, `cpu_cores` (physical, falling back to logical), `cpu_threads`, `memory_bytes`, `swap_bytes`, `disk_bytes` (sum of non-removable block devices) |
+| `storage` | full | — | `storage_health` (`healthy`, `degraded` or `failed`, see the app) and `storage_unhealthy_since` |
 | `network` | full | — | `server_addresses` rows: interface, address, prefix, family 4/6, scope. Primary public IPv4/IPv6 go on `servers.public_ipv4` / `public_ipv6`. |
 | `resolvers` | full | — | `nameservers` JSON column |
 | `packages` | delta | `manager/name/arch` | rows in `server_packages` (manager, name, version, arch, source); derived `server_software` rows (see the app) |
@@ -326,7 +327,7 @@ The field names inside each payload are defined by the agent's collectors (`coll
   - `realtime`
   - `package_metadata_refresh`: `{ "enabled": bool, "interval": seconds }`. Absent means enabled with 21600 s (6 hours).
   - `metrics`: `{ "enabled": bool, "endpoint": url, "interval": seconds }`, or `null` when this Server Chief has no metrics gateway. Absent or `null` means no metrics (see *Metrics*).
-- **Defaults:** heartbeat 300 s; `system`, `network` and `resolvers` 300 s; `hardware` 3600 s; `packages` 3600 s (or when the package database mtime changes); `updates` 21600 s; `vhosts` 900 s (or when config changes); `cloud` 86400 s (and at agent start).
+- **Defaults:** heartbeat 300 s; `system`, `network` and `resolvers` 300 s; `hardware` 3600 s; `storage` 300 s; `packages` 3600 s (or when the package database mtime changes); `updates` 21600 s; `vhosts` 900 s (or when config changes); `cloud` 86400 s (and at agent start).
 
 ## Package metadata refresh and package activity
 

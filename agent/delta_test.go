@@ -287,6 +287,30 @@ func TestApplicationsFixtureMatchesCollectorTypes(t *testing.T) {
 	}
 }
 
+// TestStorageFixtureMatchesCollectorTypes decodes the spec's storage
+// payload into the collector types: re-encoding and the agent's
+// normalisation must reproduce the fixture hash.
+func TestStorageFixtureMatchesCollectorTypes(t *testing.T) {
+	var envelope inventory.Envelope
+	if err := json.Unmarshal(readFixture(t, "inventory-storage-request.json"), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	dataset, ok := envelope.Datasets["storage"]
+	if !ok || dataset.Mode != inventory.ModeFull {
+		t.Fatal("fixture lacks a full storage dataset")
+	}
+	var storage collector.StorageInfo
+	decoder := json.NewDecoder(strings.NewReader(string(dataset.Payload)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&storage); err != nil {
+		t.Fatal(err)
+	}
+	storage.Normalize()
+	if hash, err := inventory.HashValue(&storage); err != nil || hash != dataset.Hash {
+		t.Errorf("collector type hashes to %s (%v), fixture says %s", hash, err, dataset.Hash)
+	}
+}
+
 // TestCertificatesDeltaReproducesHashOnTheBackend builds a fingerprint-keyed
 // delta against the spec fixture and applies it the way the backend does.
 func TestCertificatesDeltaReproducesHashOnTheBackend(t *testing.T) {

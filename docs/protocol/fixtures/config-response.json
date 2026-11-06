@@ -8,6 +8,7 @@
     "packages",
     "repositories",
     "resolvers",
+    "storage",
     "system",
     "updates",
     "vhosts"
@@ -23,6 +24,7 @@
       "packages": 3600,
       "repositories": 3600,
       "resolvers": 300,
+      "storage": 300,
       "system": 300,
       "updates": 21600,
       "vhosts": 900

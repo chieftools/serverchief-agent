@@ -1,0 +1,84 @@
+{
+  "collected_at": "2026-11-06T12:00:00Z",
+  "datasets": {
+    "storage": {
+      "hash": "0b6fddd369bf7b1d9370a606f1156929303b7bfb489bffde0f3c4c9b0252746f",
+      "mode": "full",
+      "payload": {
+        "arrays": [
+          {
+            "degraded": 1,
+            "level": "raid1",
+            "members": [
+              {
+                "device": "nvme0n1p2",
+                "slot": null,
+                "state": [
+                  "faulty",
+                  "write_error"
+                ]
+              },
+              {
+                "device": "nvme1n1p2",
+                "slot": 1,
+                "state": [
+                  "in_sync"
+                ]
+              }
+            ],
+            "name": "md0",
+            "raid_disks": 2,
+            "size_bytes": 33268170752,
+            "state": "active",
+            "sync_action": "idle"
+          },
+          {
+            "degraded": 1,
+            "level": "raid10",
+            "members": [
+              {
+                "device": "nvme0n1p4",
+                "slot": null,
+                "state": [
+                  "faulty",
+                  "write_error"
+                ]
+              },
+              {
+                "device": "nvme1n1p4",
+                "slot": 1,
+                "state": [
+                  "in_sync"
+                ]
+              }
+            ],
+            "name": "md2",
+            "raid_disks": 2,
+            "size_bytes": 1978887307264,
+            "state": "active",
+            "sync_action": "idle"
+          }
+        ],
+        "disks": [
+          {
+            "model": "SAMSUNG MZVL21T0HCLR-00B00",
+            "name": "nvme0n1",
+            "serial": "S000EXAMPLE0001",
+            "size_bytes": 0,
+            "state": "dead",
+            "type": "nvme"
+          },
+          {
+            "model": "SAMSUNG MZVL21T0HCLR-00B00",
+            "name": "nvme1n1",
+            "serial": "S000EXAMPLE0002",
+            "size_bytes": 1024209543168,
+            "state": "live",
+            "type": "nvme"
+          }
+        ]
+      }
+    }
+  },
+  "seq": 1
+}
