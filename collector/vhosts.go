@@ -235,12 +235,16 @@ type vhostSnapshot struct {
 // when every present source failed. A source that failed after an earlier
 // success keeps its previous items, so a briefly broken configuration (an
 // unreadable file during an edit) does not remove its sites from the
-// backend and add them back on the next run.
+// backend and add them back on the next run. A source that is not ready
+// yet (ErrNotReady) without earlier items fails the whole dataset, so its
+// sites are not reported as gone while it starts.
 type VHosts struct {
 	host *Host
 
 	mu   sync.Mutex
 	last map[string][]VHost
+	// plesk tracks how long the Plesk database has been failing.
+	plesk pleskState
 	// warned holds each source's last logged warnings, so a lasting
 	// condition (a missing include) is logged once, not every run.
 	warned map[string]string
@@ -360,9 +364,11 @@ func (collector *VHosts) Collect(ctx context.Context) (any, error) {
 		return &VHostsInfo{Items: slices.Clone(snapshot.items)}, nil
 	}
 
-	run := &vhostRun{host: collector.host, store: collector.store, certificates: make(map[string]*VHostCertificate), warnings: make(map[string][]string)}
+	run := &vhostRun{host: collector.host, store: collector.store, certificates: make(map[string]*VHostCertificate), warnings: make(map[string][]string), plesk: &collector.plesk}
 	info := &VHostsInfo{Items: []VHost{}}
 	var failures []string
+	// notReady is the first failure of a source that is still starting.
+	var notReady error
 	present := 0
 	for _, source := range vhostSources {
 		if !source.present(collector.host) {
@@ -375,8 +381,18 @@ func (collector *VHosts) Collect(ctx context.Context) (any, error) {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
+			previous, ok := collector.last[source.name]
+			if errors.Is(err, ErrNotReady) {
+				// Without earlier items its sites would be reported as gone.
+				if !ok {
+					return nil, fmt.Errorf("%s: %w", source.name, err)
+				}
+				if notReady == nil {
+					notReady = fmt.Errorf("%s: %w", source.name, err)
+				}
+			}
 			failures = append(failures, source.name+": "+err.Error())
-			if previous, ok := collector.last[source.name]; ok {
+			if ok {
 				log.Printf("[collector] vhosts: %s failed, keeping its %d previous items: %v", source.name, len(previous), err)
 				info.Items = append(info.Items, previous...)
 			} else {
@@ -395,6 +411,9 @@ func (collector *VHosts) Collect(ctx context.Context) (any, error) {
 		info.Items = append(info.Items, items...)
 	}
 	if present > 0 && len(failures) == present {
+		if notReady != nil {
+			return nil, notReady
+		}
 		return nil, errors.New(strings.Join(failures, "; "))
 	}
 	refineVHosts(collector.host, info.Items)
@@ -508,6 +527,7 @@ type vhostRun struct {
 	store        *certificateStore
 	certificates map[string]*VHostCertificate
 	warnings     map[string][]string
+	plesk        *pleskState
 }
 
 // warn records a non-fatal problem of a source, logged when it changes.

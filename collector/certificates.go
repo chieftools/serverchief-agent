@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"log"
@@ -240,6 +241,11 @@ func (collector *Certificates) Collect(ctx context.Context) (any, error) {
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		// Without the sites, the certificates only Plesk's database knows
+		// would be reported as gone until it is up.
+		if sites == nil && errors.Is(err, ErrNotReady) {
+			return nil, fmt.Errorf("sites: %w", err)
 		}
 		run.warn("sites: " + err.Error())
 	}

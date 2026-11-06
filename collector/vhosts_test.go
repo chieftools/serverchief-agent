@@ -560,15 +560,78 @@ func TestPleskQueryWithoutOptionalColumns(t *testing.T) {
 }
 
 func TestVHostsPleskFallsBackToSiteList(t *testing.T) {
+	// A database that keeps failing reports the sites by name once it has
+	// failed for the grace period. Until then the dataset waits for it, as
+	// it does right after a boot, and so do the certificates.
 	var ran []string
 	host := pleskHost(t, []vhostCommand{
 		{prefix: "plesk db", data: []byte("ERROR 1045 (28000): Access denied for user 'admin'@'localhost'\n"), exit: 1},
 		{prefix: "plesk bin site --list", file: "site-list.txt"},
 	}, &ran)
-	info := collectVHosts(t, NewVHosts(host))
+	now := time.Date(2026, 11, 5, 22, 16, 0, 0, time.UTC)
+	host.Now = func() time.Time { return now }
+	vhosts := NewVHosts(host)
+	if _, err := vhosts.Collect(context.Background()); !errors.Is(err, ErrNotReady) {
+		t.Fatalf("vhosts error = %v", err)
+	}
+	if _, err := NewCertificates(host, vhosts).Collect(context.Background()); !errors.Is(err, ErrNotReady) {
+		t.Fatalf("certificates error = %v", err)
+	}
+
+	now = now.Add(pleskStartupGrace)
+	info := collectVHosts(t, vhosts)
 	if len(info.Items) != 6 || info.Items[0].Name != "customer.test" || info.Items[0].Owner != nil || len(info.Items[0].Ports) != 0 ||
 		!slices.Equal(info.Items[0].Aliases, []string{"www.customer.test"}) || len(info.Items[4].Aliases) != 0 {
 		t.Fatalf("items = %v", vhostsJSON(t, info))
+	}
+}
+
+func TestVHostsPleskKeepsItsSitesWhileTheDatabaseIsDown(t *testing.T) {
+	// MariaDB restarting for an update: the sites keep their details
+	// instead of being reported by name only for a round.
+	var ran []string
+	host := pleskHost(t, []vhostCommand{
+		{prefix: "plesk db -Ne SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS", file: "columns.txt"},
+		{prefix: "plesk db -Ne SELECT d.id, d.name", file: "domains.txt"},
+		{prefix: "plesk db -Ne SELECT dom_id, name FROM domain_aliases", file: "aliases.txt"},
+	}, &ran)
+	working := host.Command
+	failing := vhostCommands(t, "plesk", []vhostCommand{
+		{prefix: "plesk db", data: []byte("ERROR 2002 (HY000): Can't connect to local server through socket '/run/mysqld/mysqld.sock' (2)\n"), exit: 1},
+		{prefix: "plesk bin site --list", file: "site-list.txt"},
+	}, &ran)
+	// nginx in front of Plesk's Apache, so the dataset has a source that
+	// works.
+	host.FS.(fstest.MapFS)["usr/sbin/nginx"] = mapFile(nil)
+	nginx := vhostCommands(t, "nginx", []vhostCommand{{prefix: "nginx -V", file: "nginx-V.txt"}}, &ran)
+	for name, file := range vhostFixture(t, "nginx", nil) {
+		host.FS.(fstest.MapFS)[name] = file
+	}
+	withNginx := func(plesk func(context.Context, string, ...string) (CommandResult, error)) func(context.Context, string, ...string) (CommandResult, error) {
+		return func(ctx context.Context, name string, args ...string) (CommandResult, error) {
+			if path.Base(name) == "nginx" {
+				return nginx(ctx, name, args...)
+			}
+			return plesk(ctx, name, args...)
+		}
+	}
+	now := time.Date(2026, 11, 5, 22, 0, 0, 0, time.UTC)
+	host.Now = func() time.Time { return now }
+	host.Command = withNginx(working)
+	vhosts := NewVHosts(host)
+	before := vhostsJSON(t, collectVHosts(t, vhosts))
+
+	host.Command = withNginx(failing)
+	now = now.Add(vhostSnapshotFresh)
+	if got := vhostsJSON(t, collectVHosts(t, vhosts)); !reflect.DeepEqual(got, before) {
+		t.Fatalf("while the database is down\n got %v\nwant %v", got, before)
+	}
+
+	// Without a source that works, the dataset waits for the database.
+	delete(host.FS.(fstest.MapFS), "usr/sbin/nginx")
+	now = now.Add(vhostSnapshotFresh)
+	if _, err := vhosts.Collect(context.Background()); !errors.Is(err, ErrNotReady) {
+		t.Fatalf("without nginx, error = %v", err)
 	}
 }
 

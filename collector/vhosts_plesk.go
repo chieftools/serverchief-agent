@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"go.chief.tools/serverchief-agent/helper"
 )
@@ -199,23 +201,53 @@ func (host *Host) pleskSites(ctx context.Context) (PleskSites, error) {
 	return sites, nil
 }
 
+// pleskStartupGrace is how long the psa database may fail before the
+// sites are reported from `plesk bin site --list`, by name only. Right
+// after a boot, or while MariaDB restarts for an update, the database is
+// briefly down; reporting the sites without their document root, PHP
+// version and certificate then would record those as removed and, a round
+// later, as added again.
+const pleskStartupGrace = 30 * time.Minute
+
+// pleskState remembers across collections since when the psa database
+// fails, zero while it works.
+type pleskState struct {
+	failingSince time.Time
+}
+
 func collectPlesk(ctx context.Context, run *vhostRun) ([]VHost, error) {
 	sites, err := run.host.pleskSites(ctx)
-	if err != nil {
+	if err == nil && sites.DatabaseError == "" {
+		run.plesk.failingSince = time.Time{}
+		return pleskFromRows(run, sites.Domains, sites.Aliases), nil
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	now := run.host.now()
+	if run.plesk.failingSince.IsZero() {
+		run.plesk.failingSince = now
+	}
+	if err == nil {
+		err = errors.New("plesk db: " + sites.DatabaseError)
+	}
+	// The sites keep their previous details (see VHosts), or the dataset
+	// waits for the database, until it has failed for the grace period.
+	if down := now.Sub(run.plesk.failingSince); down < pleskStartupGrace {
+		return nil, fmt.Errorf("%w (%w for %s)", err, ErrNotReady, down.Round(time.Second))
+	}
+	if sites.DatabaseError == "" {
 		return nil, err
 	}
-	switch {
-	case sites.DatabaseError == "":
-		return pleskFromRows(run, sites.Domains, sites.Aliases), nil
-	case sites.SiteListError == "":
-		items := make([]VHost, 0, len(sites.SiteList))
-		for _, name := range sites.SiteList {
-			items = append(items, VHost{Name: name})
-		}
-		return addWWWAliases(items), nil
-	default:
-		return nil, fmt.Errorf("plesk db: %s; plesk bin site --list: %s", sites.DatabaseError, sites.SiteListError)
+	if sites.SiteListError != "" {
+		return nil, fmt.Errorf("%w; plesk bin site --list: %s", err, sites.SiteListError)
 	}
+	run.warn(VHostSourcePlesk, err.Error()+"; reporting the sites by name only")
+	items := make([]VHost, 0, len(sites.SiteList))
+	for _, name := range sites.SiteList {
+		items = append(items, VHost{Name: name})
+	}
+	return addWWWAliases(items), nil
 }
 
 // pleskDatabaseRows detects the schema and returns the domain and alias
