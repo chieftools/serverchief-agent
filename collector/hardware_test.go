@@ -153,6 +153,26 @@ func TestReadFilesystemsSkipsFileBindMounts(t *testing.T) {
 	}
 }
 
+// TestReadFilesystemsReadsTheHostMounts: under systemd's ProtectSystem=strict
+// the daemon sees / read-only and bind mounts of its own directories, the
+// host's mounts are those of PID 1.
+func TestReadFilesystemsReadsTheHostMounts(t *testing.T) {
+	host := &Host{FS: fstest.MapFS{
+		"proc/1/mounts": &fstest.MapFile{Data: []byte("rpool/ROOT/pve-1 / zfs rw,relatime 0 0\n")},
+		"proc/mounts":   &fstest.MapFile{Data: []byte("rpool/ROOT/pve-1 / zfs ro,nosuid,relatime 0 0\nrpool/ROOT/pve-1 /var/lib/serverchief zfs rw 0 0\nrpool/ROOT/pve-1 /tmp zfs rw 0 0\n")},
+	}}
+	got := host.readFilesystems()
+	if len(got) != 1 || got[0].MountPoint != "/" || got[0].ReadOnly {
+		t.Fatalf("readFilesystems() = %#v, want the host's writable / only", got)
+	}
+}
+
+func TestBlockDeviceTypeOfZvols(t *testing.T) {
+	if got := blockDeviceType("zd96"); got != "zvol" {
+		t.Errorf("blockDeviceType(zd96) = %q", got)
+	}
+}
+
 func TestBlockVendor(t *testing.T) {
 	for input, want := range map[string]string{"0x1af4": "", "0x0000": "", "ATA": "ATA", "0xZZ": "0xZZ", "": ""} {
 		if got := blockVendor(input); got != want {

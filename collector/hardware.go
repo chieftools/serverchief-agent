@@ -218,6 +218,8 @@ func blockDeviceType(name string) string {
 		return "optical"
 	case strings.HasPrefix(name, "rbd"):
 		return "ceph"
+	case strings.HasPrefix(name, "zd"):
+		return "zvol"
 	default:
 		return "other"
 	}
@@ -329,11 +331,19 @@ func (host *Host) readFilesystems() []Filesystem {
 // readMountedFilesystems lists the mounted file systems the inventory
 // covers, without their sizes.
 func (host *Host) readMountedFilesystems() []Filesystem {
-	data, err := host.readFile("/proc/mounts")
-	if err != nil {
-		if data, err = host.readFile("/proc/self/mounts"); err != nil {
-			return []Filesystem{}
+	// The daemon's own mount namespace is sandboxed (ProtectSystem=strict
+	// remounts everything read-only, PrivateTmp and ReadWritePaths add bind
+	// mounts), so the mounts of PID 1 come first: the host's, or the
+	// container's own in a container.
+	var data []byte
+	var err error
+	for _, name := range []string{"/proc/1/mounts", "/proc/mounts", "/proc/self/mounts"} {
+		if data, err = host.readFile(name); err == nil && len(data) > 0 {
+			break
 		}
+	}
+	if err != nil {
+		return []Filesystem{}
 	}
 	parsed := parseMounts(data)
 	filesystems := parsed[:0]
