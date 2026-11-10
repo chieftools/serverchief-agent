@@ -365,6 +365,23 @@ func TestFailedInstallIsUpgradeFailedWithItsLastLines(t *testing.T) {
 	}
 }
 
+func TestInstallKilledBySignalSaysSo(t *testing.T) {
+	setup := newHelperSetup(t, ManagerApt)
+	setup.packages.before = []collector.Update{update("perl-base", "amd64", false)}
+	setup.packages.after = setup.packages.before
+	setup.runner.answers["/usr/bin/apt-get install"] = Output{Text: []byte("Restarting services...\n"), ExitCode: -1, Signal: "SIGTERM"}
+	setup.request(t, Request{Scope: ScopeAll, RestartServices: true})
+
+	result, output := setup.run(t)
+
+	if result.Status != StatusFailed || result.Data.Code != CodeUpgradeFailed || !strings.Contains(result.Detail, "apt-get was killed by SIGTERM: Restarting services...") {
+		t.Fatalf("result = %+v", result)
+	}
+	if !strings.Contains(output, "(apt-get was killed by SIGTERM)") || strings.Contains(output, "exit status") {
+		t.Fatalf("output = %s", output)
+	}
+}
+
 func TestBusyPackageManagerEndsAfterTheWait(t *testing.T) {
 	setup := newHelperSetup(t, ManagerApt)
 	now := time.Date(2026, 10, 22, 14, 0, 0, 0, time.UTC)

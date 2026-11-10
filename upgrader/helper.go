@@ -222,8 +222,8 @@ func (run *helper) command(ctx context.Context, env, argv []string, timeout time
 	}
 	if err != nil {
 		_, _ = run.output.Write([]byte(err.Error() + "\n"))
-	} else if output.ExitCode != 0 {
-		_, _ = run.output.Write([]byte(fmt.Sprintf("(exit status %d)\n", output.ExitCode)))
+	} else if failure := output.Failure(); failure != "" {
+		_, _ = run.output.Write([]byte("(" + baseName(argv[0]) + " " + failure + ")\n"))
 	}
 	return output, err
 }
@@ -327,8 +327,8 @@ func (run *helper) refresh(ctx context.Context) string {
 	switch {
 	case err != nil:
 		run.note("refreshing the package lists failed: " + err.Error())
-	case output.ExitCode != 0:
-		run.note(fmt.Sprintf("refreshing the package lists exited with status %d", output.ExitCode))
+	case output.Failure() != "":
+		run.note("refreshing the package lists " + output.Failure())
 	}
 	return phaseAgent
 }
@@ -417,8 +417,8 @@ func (run *helper) upgrade(ctx context.Context) (string, error) {
 	run.state.Ran, run.state.ExitCode = true, output.ExitCode
 	if err != nil {
 		run.state.Failure = err.Error()
-	} else if output.ExitCode != 0 {
-		run.state.Failure = fmt.Sprintf("%s exited with status %d: %s", baseName(argv[0]), output.ExitCode, lastLines(output.Text, 3))
+	} else if failure := output.Failure(); failure != "" {
+		run.state.Failure = fmt.Sprintf("%s %s: %s", baseName(argv[0]), failure, lastLines(output.Text, 3))
 	}
 	if manager == ManagerApt && run.request.RestartServices {
 		if packages.Tool("needrestart") == "" {

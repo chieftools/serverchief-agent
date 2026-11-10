@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -15,6 +17,9 @@ import (
 type Output struct {
 	Text     []byte
 	ExitCode int
+	// Signal names the signal that killed the program, such as SIGTERM
+	// when systemd stopped its unit; ExitCode is -1 then.
+	Signal string
 	// Streamed is set when Text also went to the runner's live writer as
 	// the program wrote it.
 	Streamed bool
@@ -60,10 +65,45 @@ func ExecRunner(ctx context.Context, env []string, argv []string, live io.Writer
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && ctx.Err() == nil {
 		output.ExitCode = exit.ExitCode()
+		if status, ok := exit.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			output.Signal = signalName(status.Signal())
+		}
 		return output, nil
 	}
 	if err != nil {
 		output.ExitCode = -1
 	}
 	return output, err
+}
+
+// Failure describes how a program that did not succeed ended: "was killed
+// by SIGTERM" or "exited with status 100". It is "" after a zero exit.
+func (output Output) Failure() string {
+	switch {
+	case output.Signal != "":
+		return "was killed by " + output.Signal
+	case output.ExitCode != 0:
+		return fmt.Sprintf("exited with status %d", output.ExitCode)
+	}
+	return ""
+}
+
+// signalNames are the signals that end a package manager in practice.
+var signalNames = map[syscall.Signal]string{
+	syscall.SIGHUP:  "SIGHUP",
+	syscall.SIGINT:  "SIGINT",
+	syscall.SIGQUIT: "SIGQUIT",
+	syscall.SIGABRT: "SIGABRT",
+	syscall.SIGKILL: "SIGKILL",
+	syscall.SIGSEGV: "SIGSEGV",
+	syscall.SIGPIPE: "SIGPIPE",
+	syscall.SIGTERM: "SIGTERM",
+}
+
+// signalName is SIGTERM for syscall.SIGTERM, "signal 10" for others.
+func signalName(signal syscall.Signal) string {
+	if name, ok := signalNames[signal]; ok {
+		return name
+	}
+	return fmt.Sprintf("signal %d", int(signal))
 }
