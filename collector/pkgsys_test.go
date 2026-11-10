@@ -41,7 +41,7 @@ func TestUpdatesSkipsWhileLocked(t *testing.T) {
 		"var/lib/dpkg/status": "@var/lib/dpkg/status",
 		"usr/bin/apt-get":     "",
 		"var/lib/apt/lists/archive.ubuntu.com_ubuntu_dists_xenial_InRelease": "",
-	}, map[string]fakeCommand{"apt-get -s -q -o Debug::NoLocking=1 dist-upgrade": {file: "apt-get-dist-upgrade.txt"}})
+	}, map[string]fakeCommand{"apt-get -s -q -o Debug::NoLocking=1 -o Dir::Bin::ischroot=/bin/false dist-upgrade": {file: "apt-get-dist-upgrade.txt"}})
 	held, now := true, time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 	host.PackageLocks = fakeTracker(&held, &now)
 
@@ -305,7 +305,7 @@ var packageManagerTools = []string{"apt", "apt-get", "apt-cache", "aptitude", "d
 // run, with program paths reduced to their base name: a simulation and
 // cache-only queries.
 var allowedCollectionCommands = []string{
-	"apt-get -s -q -o Debug::NoLocking=1 dist-upgrade",
+	"apt-get -s -q -o Debug::NoLocking=1 -o Dir::Bin::ischroot=/bin/false dist-upgrade",
 	"rpm -qa --queryformat " + rpmQueryFormat,
 	"yum -C -q --setopt=exit_on_lock=True check-update",
 	"yum -C -q --setopt=exit_on_lock=True updateinfo list security",

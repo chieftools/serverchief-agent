@@ -39,7 +39,7 @@ func TestAptUpdatesUbuntu1604(t *testing.T) {
 		"var/lib/apt/lists/ports.ubuntu.com_dists_xenial-security_main_binary-arm64_Packages": "",
 		"var/run/reboot-required":                   "",
 		"var/lib/apt/periodic/update-success-stamp": "",
-	}, map[string]fakeCommand{"apt-get -s -q -o Debug::NoLocking=1 dist-upgrade": {file: "apt-get-dist-upgrade.txt"}})
+	}, map[string]fakeCommand{"apt-get -s -q -o Debug::NoLocking=1 -o Dir::Bin::ischroot=/bin/false dist-upgrade": {file: "apt-get-dist-upgrade.txt"}})
 	info := collectUpdates(t, host)
 
 	want := []Update{

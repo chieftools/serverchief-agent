@@ -127,8 +127,15 @@ var aptInstPattern = regexp.MustCompile(`^Inst (\S+) (?:\[([^\]]*)\] )?\((\S+)(?
 // aptUpdates simulates a full upgrade. dist-upgrade rather than upgrade,
 // so updates held back by new dependencies (kernel meta packages) count.
 // Debug::NoLocking lets the simulation run next to a running apt.
+//
+// Dir::Bin::ischroot keeps phased updates this host is not yet selected for
+// out, as apt-get upgrade outside the agent does. apt (2.1.16 and later)
+// includes every phased update when `ischroot -t` reports a chroot, and it
+// does in the agent's unit: its own mount namespace (ProtectSystem,
+// PrivateTmp) makes /proc/self/mountinfo differ from /proc/1/mountinfo.
+// Older apt ignores the option.
 func (host *Host) aptUpdates(ctx context.Context) (*UpdatesInfo, error) {
-	result, err := host.run(ctx, "apt-get", "-s", "-q", "-o", "Debug::NoLocking=1", "dist-upgrade")
+	result, err := host.run(ctx, "apt-get", "-s", "-q", "-o", "Debug::NoLocking=1", "-o", "Dir::Bin::ischroot=/bin/false", "dist-upgrade")
 	if err != nil {
 		return nil, fmt.Errorf("apt-get -s dist-upgrade: %w", err)
 	}

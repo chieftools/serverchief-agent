@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Phased updates that the host is not yet selected for, such as an Ubuntu update marked `(phased 10%)` in `apt-cache policy`, are no longer listed as pending updates. Installing updates already skipped them, so they used to stay pending after every run. In the agent's sandboxed unit, apt took the private mount namespace for a chroot and included every phased update.
+
 ## [0.6.3]
 
 ### Fixed
