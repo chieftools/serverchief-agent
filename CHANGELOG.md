@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.6.5]
+
 ### Fixed
 
 - Fixed agent updates and package upgrades always failing where the agent runs as root, on systemd before 229 (such as CentOS 7) and under SysV. The package handed `/var/lib/serverchief` to the `serverchief` user anyway, so the update helper refused the requests the daemon wrote (`update-request.json is owned by uid 0`) and the daemon refused the ones left from before (`is owned by uid 981`). The package now keeps the directory owned by root there and removes requests that the `serverchief` user left behind instead of running them. Agents already on 0.6.x need this version installed once by hand, for example with `yum update serverchief`.
@@ -196,7 +198,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.6.4...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.6.5...HEAD
+[0.6.5]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.5
 [0.6.4]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.4
 [0.6.3]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.3
 [0.6.2]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.2
