@@ -9,6 +9,11 @@ release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed installing package updates failing with `exit status -1` when the agent updated itself first: needrestart restarted the upgrade's own `serverchief-upgrade` unit, which stopped apt along with the restarts of the other services. `/etc/needrestart/conf.d/serverchief.conf` now keeps every unit of the agent out of needrestart's restarts.
+- A command that is killed by a signal is reported as such, for example `apt-get was killed by SIGTERM`, instead of `exit status -1`.
+
 ## [0.6.2]
 
 ### Changed
