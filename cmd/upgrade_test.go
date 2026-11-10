@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -100,5 +101,32 @@ func TestUpgradeLauncherRunsInternalUpgradeInItsOwnUnit(t *testing.T) {
 	// The agent update helper keeps its own unit.
 	if argv := strings.Join(updater.SystemdRunArgv("/usr/bin/systemd-run", updater.Binary, 252), " "); !strings.Contains(argv, "--unit=serverchief-update ") || !strings.HasSuffix(argv, " internal-update") {
 		t.Fatalf("update argv = %s", argv)
+	}
+}
+
+// needrestart restarting a unit of the agent's would stop the package
+// upgrade's own apt (serverchief-upgrade) or an agent update. The package's
+// needrestart.conf must keep every one of them, and nothing else, out.
+func TestNeedrestartLeavesEveryAgentUnitAlone(t *testing.T) {
+	conf, err := os.ReadFile(filepath.Join("..", "packaging", "needrestart.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var patterns []*regexp.Regexp
+	for _, match := range regexp.MustCompile(`\$nrconf\{override_rc\}->\{qr\((.+)\)\} = 0;`).FindAllStringSubmatch(string(conf), -1) {
+		patterns = append(patterns, regexp.MustCompile(match[1]))
+	}
+	kept := func(unit string) bool {
+		return slices.ContainsFunc(patterns, func(pattern *regexp.Regexp) bool { return pattern.MatchString(unit) })
+	}
+	for _, unit := range []string{"serverchief", "serverchief-helper", upgradeUnit, updater.HelperUnit, transitionUnit} {
+		if !kept(unit + ".service") {
+			t.Errorf("needrestart may restart %s.service", unit)
+		}
+	}
+	for _, unit := range []string{"snmpd.service", "serverchiefx.service", "my-serverchief.service"} {
+		if kept(unit) {
+			t.Errorf("needrestart leaves %s alone", unit)
+		}
 	}
 }

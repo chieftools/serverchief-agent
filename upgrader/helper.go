@@ -110,7 +110,11 @@ type helper struct {
 // state and output. It is idempotent: without a request, or with a result
 // already written for it, it only cleans up. Cancelling ctx (SIGTERM)
 // stops a wait, never a running package manager, and leaves the state for
-// the next run. The caller holds the helper lock.
+// the next run. That protects a package manager from the helper only:
+// stopping or restarting the serverchief-upgrade unit signals every
+// process in it, the package manager too (systemd's default
+// KillMode=control-group), which is why needrestart leaves the unit alone
+// (packaging/needrestart.conf). The caller holds the helper lock.
 func RunHelper(ctx context.Context, options Options) error {
 	options.defaults()
 	files := options.Files
