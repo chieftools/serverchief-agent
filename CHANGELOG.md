@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed agent updates and package upgrades always failing where the agent runs as root, on systemd before 229 (such as CentOS 7) and under SysV. The package handed `/var/lib/serverchief` to the `serverchief` user anyway, so the update helper refused the requests the daemon wrote (`update-request.json is owned by uid 0`) and the daemon refused the ones left from before (`is owned by uid 981`). The package now keeps the directory owned by root there and removes requests that the `serverchief` user left behind instead of running them. Agents already on 0.6.x need this version installed once by hand, for example with `yum update serverchief`.
+
 ## [0.6.4]
 
 ### Fixed

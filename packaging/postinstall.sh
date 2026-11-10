@@ -59,6 +59,20 @@ if [ -e "$state/update-request.json" ] && [ "$(stat -c %u "$state" 2>/dev/null |
     transitional=true
 fi
 
+# The daemon only runs unprivileged under systemd 229 or later, which can
+# grant it CAP_DAC_READ_SEARCH. Older systemd and SysV init run it as root.
+systemd_version=0
+if [ -d /run/systemd/system ]; then
+    systemd_version="$(systemctl --version 2>/dev/null | awk 'NR == 1 { print $2 }')"
+    case "$systemd_version" in
+        ''|*[!0-9]*) systemd_version=0 ;;
+    esac
+fi
+root_daemon=true
+if [ "$systemd_version" -ge 229 ]; then
+    root_daemon=false
+fi
+
 install -d -m 0750 -o root -g serverchief /etc/serverchief
 for file in identity.json config.json; do
     if [ -f "/etc/serverchief/$file" ]; then
@@ -68,7 +82,14 @@ for file in identity.json config.json; do
 done
 install -d -m 0700 "$state"
 install -d -m 0750 /var/log/serverchief
-if [ "$transitional" = false ]; then
+if [ "$root_daemon" = true ]; then
+    # A root daemon checks its files against root and the update helpers
+    # against the owner of the state directory, so it stays root's. A
+    # request the serverchief user left behind never reached a helper: drop
+    # it instead of handing it to root, which would run it on start.
+    find "$state" -maxdepth 1 -type f -name '*-request.json' ! -uid 0 -exec rm -f {} +
+    chown -R root:root "$state" /var/log/serverchief
+elif [ "$transitional" = false ]; then
     chown -R serverchief:serverchief "$state" /var/log/serverchief
 fi
 install -d -m 0700 -o serverchief -g serverchief "$state/helper"
@@ -77,11 +98,7 @@ install -d -m 0700 -o serverchief -g serverchief "$state/helper"
 # Enabling the service is left to `serverchief setup`; an upgrade restarts
 # an agent that is already running.
 if [ -d /run/systemd/system ]; then
-    version="$(systemctl --version 2>/dev/null | awk 'NR == 1 { print $2 }')"
-    case "$version" in
-        ''|*[!0-9]*) version=0 ;;
-    esac
-    if [ "$version" -lt 229 ]; then
+    if [ "$root_daemon" = true ]; then
         # No ambient capabilities: run the daemon as root, as before.
         install -m 0644 "$template" "$override"
     elif [ "$transitional" = true ]; then
@@ -91,7 +108,7 @@ if [ -d /run/systemd/system ]; then
         rm -f "$override"
     fi
     systemctl daemon-reload || true
-    if [ "$version" -ge 229 ]; then
+    if [ "$root_daemon" = false ]; then
         systemctl enable serverchief-helper.path >/dev/null 2>&1 || true
         systemctl start serverchief-helper.path || true
     fi
