@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.6.3]
+
 ### Fixed
 
 - Fixed installing package updates failing with `exit status -1` when the agent updated itself first: needrestart restarted the upgrade's own `serverchief-upgrade` unit, which stopped apt along with the restarts of the other services. `/etc/needrestart/conf.d/serverchief.conf` now keeps every unit of the agent out of needrestart's restarts.
@@ -184,7 +186,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.3
 [0.6.2]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.2
 [0.6.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.1
 [0.6.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.0
