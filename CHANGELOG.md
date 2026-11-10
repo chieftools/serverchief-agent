@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.6.4]
+
 ### Fixed
 
 - Phased updates that the host is not yet selected for, such as an Ubuntu update marked `(phased 10%)` in `apt-cache policy`, are no longer listed as pending updates. Installing updates already skipped them, so they used to stay pending after every run. In the agent's sandboxed unit, apt took the private mount namespace for a chroot and included every phased update.
@@ -190,7 +192,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.4
 [0.6.3]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.3
 [0.6.2]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.2
 [0.6.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.1
