@@ -219,8 +219,15 @@ type commandWaiter struct {
 	kind string
 	// remaining are datasets that have yet to go through a push.
 	remaining map[string]bool
+	// afterRefresh are datasets that read the package metadata: a
+	// refresh_inventory collects them once the metadata refresh it started
+	// settled, then moves them to remaining.
+	afterRefresh map[string]bool
 	// skipped are requested datasets that are not collected.
 	skipped []string
+	// notes explain a successful result, such as package lists that were
+	// not refreshed because a package manager held its lock.
+	notes []string
 	// failures collects collector and delivery errors.
 	failures []string
 }
@@ -228,6 +235,10 @@ type commandWaiter struct {
 // datasetArgs are the arguments of refresh_inventory and resync.
 type datasetArgs struct {
 	Datasets []string `json:"datasets"`
+	// RefreshMetadata (1.4.0) makes refresh_inventory refresh the package
+	// metadata before it collects updates and repositories. Absent means
+	// true; resync ignores it.
+	RefreshMetadata *bool `json:"refresh_metadata"`
 }
 
 // requestCommands makes the loop call GET /commands now, unless a fetch
@@ -416,12 +427,15 @@ func (daemon *daemon) execute(record commandRecord) {
 				return
 			}
 		}
-		for _, name := range targets {
-			daemon.next[name] = now
-		}
 		if len(targets) == 0 {
 			daemon.finishCommand(record.ID, CommandSucceeded, "no datasets are enabled")
 			return
+		}
+		if record.Kind == CommandRefreshInventory && (args.RefreshMetadata == nil || *args.RefreshMetadata) {
+			daemon.requestRefresh(waiter, now)
+		}
+		for name := range waiter.remaining {
+			daemon.next[name] = now
 		}
 		daemon.waiters = append(daemon.waiters, waiter)
 	case CommandUpdateAgent:
@@ -462,7 +476,7 @@ func (daemon *daemon) settleInventory(attempted []string, err error, failures ma
 				waiter.failures = append(waiter.failures, name+": "+err.Error())
 			}
 		}
-		return len(waiter.remaining) == 0
+		return len(waiter.remaining) == 0 && len(waiter.afterRefresh) == 0
 	})
 }
 
@@ -487,13 +501,15 @@ func (daemon *daemon) pruneWaiters() {
 		if waiter.kind == CommandRefreshConfig {
 			return false
 		}
-		for name := range waiter.remaining {
-			if _, scheduled := daemon.next[name]; !scheduled {
-				delete(waiter.remaining, name)
-				waiter.skipped = append(waiter.skipped, name)
+		for _, datasets := range []map[string]bool{waiter.remaining, waiter.afterRefresh} {
+			for name := range datasets {
+				if _, scheduled := daemon.next[name]; !scheduled {
+					delete(datasets, name)
+					waiter.skipped = append(waiter.skipped, name)
+				}
 			}
 		}
-		return len(waiter.remaining) == 0
+		return len(waiter.remaining) == 0 && len(waiter.afterRefresh) == 0
 	})
 }
 
@@ -508,9 +524,13 @@ func (daemon *daemon) settle(done func(*commandWaiter) bool) {
 		status, detail := CommandSucceeded, ""
 		if len(waiter.failures) > 0 {
 			status, detail = CommandFailed, strings.Join(waiter.failures, "; ")
-		} else if len(waiter.skipped) > 0 {
-			slices.Sort(waiter.skipped)
-			detail = "not enabled: " + strings.Join(slices.Compact(waiter.skipped), ", ")
+		} else {
+			notes := waiter.notes
+			if len(waiter.skipped) > 0 {
+				slices.Sort(waiter.skipped)
+				notes = append([]string{"not enabled: " + strings.Join(slices.Compact(waiter.skipped), ", ")}, notes...)
+			}
+			detail = strings.Join(notes, "; ")
 		}
 		daemon.finishCommand(waiter.id, status, detail)
 	}

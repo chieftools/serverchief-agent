@@ -61,6 +61,10 @@ const (
 	// refreshShutdownWait is how long a shutdown waits for a running
 	// refresh, which got SIGTERM, to exit.
 	refreshShutdownWait = 15 * time.Second
+	// requestedRefreshMinimumAge is how old the cache must be before a
+	// refresh_inventory refreshes it, so repeated requests do not hammer
+	// the mirrors.
+	requestedRefreshMinimumAge = 5 * time.Minute
 )
 
 func (timings PackageTimings) withDefaults() PackageTimings {
@@ -93,6 +97,9 @@ type packageWork struct {
 
 	// refreshAt is zero while the refresh is disabled or running.
 	refreshAt time.Time
+	// requested makes the due refresh one a refresh_inventory asked for:
+	// it runs unless the cache is younger than requestedRefreshMinimumAge.
+	requested bool
 	running   bool
 	startedAt time.Time
 	done      chan error
@@ -156,7 +163,8 @@ func (daemon *daemon) scheduleRefresh(now time.Time) {
 	switch {
 	case work.running:
 	case !enabled:
-		work.refreshAt = time.Time{}
+		work.refreshAt, work.requested = time.Time{}, false
+		daemon.settleRefreshWaiters("package lists not refreshed: the package metadata refresh is turned off", "", now)
 	case work.refreshAt.IsZero():
 		work.refreshAt = now.Add(daemon.options.Jitter(work.timings.RefreshStartDelay))
 	case work.refreshAt.After(now.Add(interval)):
@@ -238,17 +246,77 @@ func (daemon *daemon) pollPackageActivity(now time.Time) {
 	}
 }
 
+// requestRefresh makes a refresh_inventory refresh the package metadata
+// first when it collects updates: updates and repositories then wait for
+// that refresh, which starts on the next tick, or for the one already
+// running. Without a refresh to wait for they are collected from the
+// existing cache right away.
+func (daemon *daemon) requestRefresh(waiter *commandWaiter, now time.Time) {
+	if !waiter.remaining[datasetUpdates] || daemon.options.Packages == nil {
+		return
+	}
+	if enabled, _ := daemon.refreshSettings(); !enabled {
+		waiter.notes = append(waiter.notes, "package lists not refreshed: the package metadata refresh is turned off")
+		return
+	}
+	waiter.afterRefresh = make(map[string]bool)
+	for _, name := range refreshDatasets {
+		if waiter.remaining[name] {
+			delete(waiter.remaining, name)
+			waiter.afterRefresh[name] = true
+		}
+	}
+	work := &daemon.packages
+	if work.running {
+		log.Printf("[packages] %s %s: waiting for the running metadata refresh", waiter.kind, waiter.id)
+		return
+	}
+	work.requested, work.refreshAt = true, now
+}
+
+// settleRefreshWaiters hands the datasets that waited for a metadata
+// refresh to the next push, which collects them from whatever cache there
+// is. note explains a refresh that did not run, failure one that failed.
+func (daemon *daemon) settleRefreshWaiters(note, failure string, now time.Time) {
+	for _, waiter := range daemon.waiters {
+		if len(waiter.afterRefresh) == 0 {
+			continue
+		}
+		for name := range waiter.afterRefresh {
+			waiter.remaining[name] = true
+			if _, scheduled := daemon.next[name]; scheduled {
+				daemon.next[name] = now
+			}
+		}
+		clear(waiter.afterRefresh)
+		if note != "" {
+			waiter.notes = append(waiter.notes, note)
+		}
+		if failure != "" {
+			waiter.failures = append(waiter.failures, failure)
+		}
+	}
+}
+
 // startRefresh runs a due metadata refresh in the background, unless the
-// cache is fresh enough or a package manager holds a lock.
+// cache is fresh enough or a package manager holds a lock. A requested
+// refresh only skips a cache younger than requestedRefreshMinimumAge.
 func (daemon *daemon) startRefresh(ctx context.Context, now time.Time) {
 	work := &daemon.packages
+	requested := work.requested
+	work.requested = false
 	enabled, interval := daemon.refreshSettings()
 	if !enabled {
 		work.refreshAt = time.Time{}
+		daemon.settleRefreshWaiters("package lists not refreshed: the package metadata refresh is turned off", "", now)
 		return
 	}
 	period := normalJitter(interval, JitterFraction, daemon.options.Jitter)
-	if cache := daemon.options.Packages.CacheUpdatedAt(); cache != nil && now.Sub(*cache) < period {
+	minimumAge, minimumLabel := period, interval
+	if requested {
+		minimumAge, minimumLabel = requestedRefreshMinimumAge, requestedRefreshMinimumAge
+	}
+	if cache := daemon.options.Packages.CacheUpdatedAt(); cache != nil && now.Sub(*cache) < minimumAge {
 		// A cache from the future (a clock that jumped back) counts as new.
 		from := *cache
 		if from.After(now) {
@@ -256,18 +324,21 @@ func (daemon *daemon) startRefresh(ctx context.Context, now time.Time) {
 		}
 		work.refreshAt = later(from.Add(period), now.Add(time.Minute))
 		log.Printf("[packages] metadata refresh skipped: the cache is from %s, younger than %s; next check in %s",
-			cache.UTC().Format(time.RFC3339), interval, work.refreshAt.Sub(now).Round(time.Second))
+			cache.UTC().Format(time.RFC3339), minimumLabel, work.refreshAt.Sub(now).Round(time.Second))
+		daemon.settleRefreshWaiters("", "", now)
 		return
 	}
 	if daemon.update.inProgress {
 		// The update helper drives the package manager; stay out of its way.
 		work.refreshAt = now.Add(daemon.lockRetry())
 		log.Printf("[packages] metadata refresh skipped: an agent update is in progress; retrying in %s", work.refreshAt.Sub(now).Round(time.Second))
+		daemon.settleRefreshWaiters("package lists not refreshed: an agent update is in progress", "", now)
 		return
 	}
 	if lock, _, held := daemon.options.Packages.BusyLock(); held {
 		work.refreshAt = now.Add(daemon.lockRetry())
 		log.Printf("[packages] metadata refresh skipped: %s is held; retrying in %s", lock, work.refreshAt.Sub(now).Round(time.Second))
+		daemon.settleRefreshWaiters("package lists not refreshed: "+lock+" is held", "", now)
 		return
 	}
 
@@ -313,9 +384,11 @@ func (daemon *daemon) finishRefresh(err error, now time.Time) {
 				}
 			}
 		}
+		daemon.settleRefreshWaiters("", "", now)
 	case errors.Is(err, collector.ErrPackageManagerBusy):
 		work.refreshAt = now.Add(daemon.lockRetry())
 		log.Printf("[packages] metadata refresh skipped: %v; retrying in %s", err, work.refreshAt.Sub(now).Round(time.Second))
+		daemon.settleRefreshWaiters("package lists not refreshed: "+err.Error(), "", now)
 	default:
 		work.failures++
 		backoff := interval
@@ -328,6 +401,7 @@ func (daemon *daemon) finishRefresh(err error, now time.Time) {
 		backoff = max(min(backoff, maximumRefreshBackoff), interval)
 		work.refreshAt = now.Add(normalJitter(backoff, JitterFraction, daemon.options.Jitter))
 		log.Printf("[packages] metadata refresh failed (%d in a row): %v; retrying in %s", work.failures, err, work.refreshAt.Sub(now).Round(time.Minute))
+		daemon.settleRefreshWaiters("", "package metadata refresh failed: "+err.Error(), now)
 	}
 	if !enabled {
 		work.refreshAt = time.Time{}

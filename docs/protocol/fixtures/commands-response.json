@@ -2,7 +2,8 @@
   "commands": [
     {
       "args": {
-        "datasets": null
+        "datasets": null,
+        "refresh_metadata": true
       },
       "created_at": "2026-10-22T14:10:00Z",
       "expires_at": "2026-10-23T14:10:00Z",

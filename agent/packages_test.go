@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -637,5 +639,145 @@ func TestPackageActivityCollectsRepositories(t *testing.T) {
 	daemon.pollPackageActivity(later)
 	if !daemon.next["repositories"].Equal(later) {
 		t.Fatalf("repositories due at %s after package activity", daemon.next["repositories"])
+	}
+}
+
+// refreshCommandDaemon returns a packages daemon with a command journal
+// that completed its startup round. Its package cache is an hour old, so
+// the scheduled refresh skips it.
+func refreshCommandDaemon(t *testing.T, change func(*RunOptions)) (*daemon, *protocolServer, *fakePackages, *fakeCollector) {
+	t.Helper()
+	server := newProtocolServer(t)
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	daemon, system, _, updates := packagesDaemon(t, server, now, func(options *RunOptions) {
+		journal, err := OpenCommandJournal(filepath.Join(t.TempDir(), "commands.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.Commands = journal
+		cache := now.Add(-time.Hour)
+		options.Packages.(*fakePackages).cache = &cache
+		if change != nil {
+			change(options)
+		}
+		server.config = options.ServerConfig
+	})
+	tick(t, daemon)
+	if system.count() != 0 {
+		t.Fatal("the scheduled refresh refreshed a cache that is an hour old")
+	}
+	return daemon, server, system, updates
+}
+
+// commandResult returns the only result of a command.
+func commandResult(t *testing.T, server *protocolServer, id string) (string, string) {
+	t.Helper()
+	results := server.resultsOf(id)
+	if len(results) != 1 {
+		t.Fatalf("%s results = %+v", id, results)
+	}
+	detail := ""
+	if results[0].Detail != nil {
+		detail = *results[0].Detail
+	}
+	return results[0].Status, detail
+}
+
+// TestRequestedRefreshCollectsUpdatesAfterRefreshingMetadata: a
+// refresh_inventory refreshes a cache the schedule considers fresh, and
+// only finishes once updates was collected from the refreshed metadata.
+func TestRequestedRefreshCollectsUpdatesAfterRefreshingMetadata(t *testing.T) {
+	daemon, server, system, updates := refreshCommandDaemon(t, nil)
+	now := daemon.options.Now()
+	fresh := now
+	system.set(func(fake *fakePackages) {
+		fake.onRefresh = func() {
+			system.set(func(fake *fakePackages) { fake.cache = &fresh })
+			updates.set(map[string]int{"pending": 3}, nil)
+		}
+	})
+
+	server.addCommand("c1", CommandRefreshInventory, `{"datasets":null}`)
+	daemon.heartbeatAt = daemon.options.Now()
+	tick(t, daemon) // ack, start the refresh, push everything but updates
+	if !daemon.packages.running {
+		t.Fatal("the command did not start a metadata refresh")
+	}
+	if results := server.resultsOf("c1"); len(results) != 0 {
+		t.Fatalf("finished before the refresh: %+v", results)
+	}
+
+	daemon.finishRefresh(<-daemon.packages.done, now)
+	tick(t, daemon) // push updates, report the result
+	if status, detail := commandResult(t, server, "c1"); status != CommandSucceeded || detail != "" {
+		t.Fatalf("result = %s %q", status, detail)
+	}
+	sent := server.sent()
+	if last := sent[len(sent)-1]; !slices.Contains(envelopeNames(last), "updates") {
+		t.Fatalf("updates not pushed after the refresh: %v", envelopeNames(last))
+	}
+	if system.count() != 1 {
+		t.Fatalf("%d refreshes", system.count())
+	}
+}
+
+// TestRequestedRefreshWithoutRefreshingMetadata: the cases where a
+// refresh_inventory collects updates from the existing cache right away.
+func TestRequestedRefreshWithoutRefreshingMetadata(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		args    string
+		options func(*RunOptions)
+		change  func(*fakePackages, time.Time)
+		detail  string
+	}{
+		{name: "not asked to", args: `{"datasets":["updates"],"refresh_metadata":false}`},
+		{name: "cache just refreshed", args: `{"datasets":null}`, change: func(fake *fakePackages, now time.Time) {
+			cache := now.Add(-2 * time.Minute)
+			fake.cache = &cache
+		}},
+		{name: "lock held", args: `{"datasets":null}`, change: func(fake *fakePackages, _ time.Time) {
+			fake.lock = "/var/lib/dpkg/lock-frontend (fcntl, pid 4242)"
+		}, detail: "package lists not refreshed: /var/lib/dpkg/lock-frontend (fcntl, pid 4242) is held"},
+		{name: "turned off", args: `{"datasets":null}`, options: func(options *RunOptions) {
+			options.ServerConfig.PackageMetadataRefresh = &PackageMetadataRefresh{Enabled: false, Interval: 21600}
+		}, detail: "package lists not refreshed: the package metadata refresh is turned off"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			daemon, server, system, _ := refreshCommandDaemon(t, test.options)
+			if test.change != nil {
+				system.set(func(fake *fakePackages) { test.change(fake, daemon.options.Now()) })
+			}
+
+			server.addCommand("c1", CommandRefreshInventory, test.args)
+			daemon.heartbeatAt = daemon.options.Now()
+			tick(t, daemon)
+			if status, detail := commandResult(t, server, "c1"); status != CommandSucceeded || detail != test.detail {
+				t.Fatalf("result = %s %q, want detail %q", status, detail, test.detail)
+			}
+			if daemon.packages.running || system.count() != 0 {
+				t.Fatal("refreshed the metadata")
+			}
+		})
+	}
+}
+
+// TestRequestedRefreshFailureFailsTheCommand: updates is still collected
+// from the existing cache, but the command reports that the package lists
+// could not be refreshed.
+func TestRequestedRefreshFailureFailsTheCommand(t *testing.T) {
+	daemon, server, system, _ := refreshCommandDaemon(t, nil)
+	system.set(func(fake *fakePackages) {
+		fake.result = errors.New("apt-get update exited with status 100: E: The repository 'http://ppa.example.com/ubuntu noble Release' does not have a Release file.")
+	})
+
+	server.addCommand("c1", CommandRefreshInventory, `{"datasets":["updates"]}`)
+	daemon.heartbeatAt = daemon.options.Now()
+	tick(t, daemon)
+	daemon.finishRefresh(<-daemon.packages.done, daemon.options.Now())
+	tick(t, daemon)
+	status, detail := commandResult(t, server, "c1")
+	if status != CommandFailed || !strings.HasPrefix(detail, "package metadata refresh failed: apt-get update exited with status 100") {
+		t.Fatalf("result = %s %q", status, detail)
 	}
 }

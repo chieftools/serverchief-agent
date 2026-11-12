@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Changed
+
+- Refreshing a server's inventory from Server Chief now refreshes the package lists first (`apt-get update`, `yum`/`dnf makecache`), so it shows updates published since the agent's last scheduled refresh, which runs every 6 hours. Pending updates and repositories are reported once the refresh finished. A refresh within 5 minutes of the previous one reuses its package lists, a package manager that holds its lock is not waited for, and an operator who turned the metadata refresh off keeps it off. Refreshing with `refresh_metadata: false` collects from the existing package lists as before.
+
 ## [0.6.5]
 
 ### Fixed

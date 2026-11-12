@@ -1,6 +1,6 @@
 # Server Chief agent protocol v1
 
-Revision **1.3.0**. This document is the contract between the Server Chief control plane and the `serverchief` agent in this repository. Both sides test against the fixtures in [`fixtures/`](fixtures/); the agent's tests replay them from here, and the control plane keeps a copy.
+Revision **1.4.0**. This document is the contract between the Server Chief control plane and the `serverchief` agent in this repository. Both sides test against the fixtures in [`fixtures/`](fixtures/); the agent's tests replay them from here, and the control plane keeps a copy.
 
 Revision 1.0.0 was refined in place until the first production deploy. Since then, additive changes bump the minor revision and incompatible changes need `/agent/v2`. Both sides accept every revision of the same major.
 
@@ -9,6 +9,8 @@ Revision 1.0.0 was refined in place until the first production deploy. Since the
 **Changes in 1.2.0** (agent 0.4.0): the `reboot` command reboots the server, and the heartbeat's `capabilities.reboot` tells whether the agent can (see *Reboots*). The server's operator can turn remote actions off on the server itself, and `capabilities.disabled` lists what they turned off (see *Operator opt-out*). Running `upgrade_packages` commands stream their output while they run (see *Live output*). The `upgrade_packages` command installs package updates, and `capabilities.upgrade_packages` tells whether the agent can (see *Package updates*). A command result can carry the `output` of what the command ran, which the panel keeps as its execution log (see *Commands*). The root helper gains the `reboot` and `start-package-upgrade` actions.
 
 **Changes in 1.3.0** (agent 0.5.0): a `reboot` sends the output of scheduling it as live output right away, instead of only with its result after the server is back, and the result's `output` ends with a `# ` line on how the reboot went (see *Live output* and *Reboots*).
+
+**Changes in 1.4.0** (agent 0.7.0): `refresh_inventory` takes `refresh_metadata` and, unless it is `false`, refreshes the package metadata before it collects `updates` and `repositories`, so it reports updates that were published since the last scheduled refresh (see *Commands* and *Package metadata refresh and package activity*). Its result can carry a `detail` when it succeeded, explaining package lists that were not refreshed.
 
 The design follows the Backup Chief agent protocol:
 
@@ -343,6 +345,7 @@ The field names inside each payload are defined by the agent's collectors (`coll
   - any package-manager lock is held (see below)
 - A failure, such as EOL mirrors or no network, is logged and retried on the next cycle with backoff. It is never reported as a dataset error, because `updates` still reports from the existing cache.
 - After a successful refresh, the agent collects `updates` immediately.
+- A `refresh_inventory` that collects `updates` (1.4.0, unless its `refresh_metadata` is `false`) makes a refresh due right away. It only skips a cache younger than 5 minutes, so repeated requests do not hammer the mirrors, and joins a refresh that is already running. It does not wait for a held lock: it collects from the existing cache instead and the regular retry follows. It does nothing when the refresh is not enabled. A successful requested refresh starts the next `interval` from then.
 
 **Package activity trigger:**
 - The agent polls the package database every 30 s (cheap `stat` only): `/var/lib/dpkg/status`, or `/var/lib/rpm/rpmdb.sqlite` / `Packages`.
@@ -389,7 +392,9 @@ Commands are how the control plane asks an agent to do something. In 1.0.0 the k
   - Commands still `acknowledged` one hour after they were acknowledged, without a result, also become `expired`; three hours for `update_agent` and `upgrade_packages`, which may wait an hour for the package manager first.
   - The agent keeps a local journal (`/var/lib/serverchief/commands.json`) and never runs a command it already ran, even when the server lists it again.
 - **Kinds:**
-  - `refresh_inventory` `{ "datasets": [names] | null }`: collect the listed datasets (or all enabled ones) now and push whatever changed. The UI "Refresh inventory" button creates this command.
+  - `refresh_inventory` `{ "datasets": [names] | null, "refresh_metadata": bool }`: collect the listed datasets (or all enabled ones) now and push whatever changed. The UI "Refresh inventory" button creates this command.
+    - `refresh_metadata` (1.4.0) is optional, absent means `true`. When `updates` is collected, the agent first refreshes the package metadata, then collects `updates` and `repositories`, and the command finishes once those went through a push (see *Package metadata refresh and package activity*). The other datasets are collected and pushed right away. `false` collects everything from the existing cache, like agents before 0.7.0.
+    - When the refresh did not run, `updates` and `repositories` are collected from the existing cache and the command `succeeded`, with a `detail` such as `package lists not refreshed: /var/lib/dpkg/lock-frontend (fcntl, pid 4242) is held` or `package lists not refreshed: the package metadata refresh is turned off`. A refresh that failed makes the command `failed` with `package metadata refresh failed: <error>`, also though the datasets were pushed from the existing cache.
   - `resync` `{ "datasets": [names] | null }`: send the listed (or all enabled) datasets in full on the next push, even when unchanged.
   - For both, listed datasets that are not enabled are skipped. The agent reports `failed` when none of the listed datasets are enabled, otherwise `succeeded` with detail `not enabled: <names>` when some were skipped.
   - `refresh_config` `{}`: fetch `GET /config` now.

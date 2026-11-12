@@ -42,7 +42,7 @@
     "enabled": true,
     "interval": 21600
   },
-  "protocol_revision": "1.3.0",
+  "protocol_revision": "1.4.0",
   "realtime": {
     "auth_endpoint": "https://server.chief.test/agent/v1/broadcasting/auth",
     "host": "socket.chieftools.cloud",

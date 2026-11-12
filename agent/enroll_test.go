@@ -144,7 +144,7 @@ func TestEnrollWritesIdentityAndStartsService(t *testing.T) {
 		t.Fatalf("%d enroll requests", len(requests))
 	}
 	request := requests[0]
-	if request.Token != testToken || request.ProtocolRevision != "1.3.0" || request.Hostname != "web-01" || request.Platform != "ubuntu 16.04.7" ||
+	if request.Token != testToken || request.ProtocolRevision != "1.4.0" || request.Hostname != "web-01" || request.Platform != "ubuntu 16.04.7" ||
 		request.Architecture != "arm64" || request.InitSystem != "systemd" || request.AgentVersion != "0.1.0" ||
 		request.PreviousServerID != nil || request.PreviousGeneration != nil {
 		t.Fatalf("request = %+v", request)
