@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.7.0]
+
 ### Changed
 
 - Refreshing a server's inventory from Server Chief now refreshes the package lists first (`apt-get update`, `yum`/`dnf makecache`), so it shows updates published since the agent's last scheduled refresh, which runs every 6 hours. Pending updates and repositories are reported once the refresh finished. A refresh within 5 minutes of the previous one reuses its package lists, a package manager that holds its lock is not waited for, and an operator who turned the metadata refresh off keeps it off. Refreshing with `refresh_metadata: false` collects from the existing package lists as before.
@@ -202,7 +204,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.7.0
 [0.6.5]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.5
 [0.6.4]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.4
 [0.6.3]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.3
