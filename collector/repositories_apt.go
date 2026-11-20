@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"path"
+	"slices"
 	"strings"
 )
 
@@ -22,6 +24,8 @@ type aptEntry struct {
 	signedBy   *string
 	trusted    bool
 	arches     []string
+	// mirrors are the sanitized URIs of a mirror+file: URI's mirror list.
+	mirrors []string
 }
 
 // aptRepositoryID is "<suite>:<hash>", the hash covering the file, type,
@@ -36,7 +40,7 @@ func (entry aptEntry) repository() Repository {
 		File:       entry.file,
 		Type:       entry.kind,
 		Enabled:    entry.enabled,
-		URIs:       []string{sanitizeURI(entry.uri)},
+		URIs:       append([]string{sanitizeURI(entry.uri)}, entry.mirrors...),
 		Suite:      entry.suite,
 		Components: entry.components,
 		Signing:    RepositorySigning{SignedBy: entry.signedBy, Trusted: entry.trusted},
@@ -62,7 +66,84 @@ func (host *Host) aptEntries() []aptEntry {
 			entries = append(entries, parseAptList(file, data)...)
 		}
 	}
+	lists := map[string][]string{}
+	for position := range entries {
+		name := aptMirrorListPath(entries[position].uri)
+		if name == "" {
+			continue
+		}
+		mirrors, read := lists[name]
+		if !read {
+			mirrors = host.aptMirrorList(name)
+			lists[name] = mirrors
+		}
+		entries[position].mirrors = mirrors
+	}
 	return entries
+}
+
+// maximumMirrorURIs caps the mirrors reported from one mirror list: the
+// first few tell whose archive it is.
+const maximumMirrorURIs = 10
+
+// aptMirrorListPath returns the file of a mirror+file: URI (apt's mirror
+// method with a local list, as on Debian's cloud images:
+// mirror+file:///etc/apt/mirrors/debian.list), "" for any other URI.
+func aptMirrorListPath(uri string) string {
+	scheme, rest, found := strings.Cut(uri, ":")
+	if !found || !strings.EqualFold(scheme, "mirror+file") {
+		return ""
+	}
+	if after, isURL := strings.CutPrefix(rest, "//"); isURL {
+		authority, name, _ := strings.Cut(after, "/")
+		if authority != "" && !strings.EqualFold(authority, "localhost") {
+			return ""
+		}
+		rest = "/" + name
+	}
+	if rest == "/" || !strings.HasPrefix(rest, "/") {
+		return ""
+	}
+	return path.Clean(rest)
+}
+
+// aptMirrorList reads the mirrors of a mirror list, sanitized, at most
+// maximumMirrorURIs. apt's credential files are never read, wherever a
+// list points.
+func (host *Host) aptMirrorList(name string) []string {
+	if name == "/etc/apt/auth.conf" || strings.HasPrefix(name, "/etc/apt/auth.conf.d/") {
+		return nil
+	}
+	data, ok := host.readSourceFile(name)
+	if !ok {
+		return nil
+	}
+	return parseAptMirrorList(data)
+}
+
+// parseAptMirrorList returns the URIs of a mirror list: one mirror per
+// line, optionally followed by tab-separated metadata (priority:1,
+// type:deb), with "#" starting a comment line. Lines that do not start
+// with a URI, or name another mirror list, are skipped, as are
+// duplicates.
+func parseAptMirrorList(data []byte) []string {
+	var mirrors []string
+	for _, line := range lines(data) {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+		if transport := uriTransport(fields[0]); transport == "" || transport == "mirror" {
+			continue
+		}
+		if mirror := sanitizeURI(fields[0]); !slices.Contains(mirrors, mirror) {
+			mirrors = append(mirrors, mirror)
+			if len(mirrors) == maximumMirrorURIs {
+				break
+			}
+		}
+	}
+	return mirrors
 }
 
 // parseAptList parses the one-line format:

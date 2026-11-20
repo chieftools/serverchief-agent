@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Repositories that use apt's mirror method with a local list, such as `mirror+file:///etc/apt/mirrors/debian.list` on Debian's cloud images, now report the mirrors that list names. Server Chief could not tell whose archive they were, so it showed them as an unknown third-party vendor and did not check the distribution's packages from them against security advisories.
+
 ## [0.7.1]
 
 ### Added

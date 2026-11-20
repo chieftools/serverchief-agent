@@ -286,6 +286,107 @@ func TestAptListNames(t *testing.T) {
 	}
 }
 
+func TestAptMirrorListPath(t *testing.T) {
+	for uri, want := range map[string]string{
+		"mirror+file:/etc/apt/mirrors/debian.list":            "/etc/apt/mirrors/debian.list",
+		"mirror+file:///etc/apt/mirrors/debian-security.list": "/etc/apt/mirrors/debian-security.list",
+		"MIRROR+FILE://localhost/etc/apt/mirrors/debian.list": "/etc/apt/mirrors/debian.list",
+		"mirror+file:/etc/apt/mirrors/../mirrors/debian.list": "/etc/apt/mirrors/debian.list",
+		"mirror+file://mirrors.example.test/etc/debian.list":  "",
+		"mirror+file:etc/apt/mirrors/debian.list":             "",
+		"mirror+file:///": "",
+		"mirror+https://mirrors.example.test/debian.list": "",
+		"mirror://mirrors.example.test/debian.list":       "",
+		"file:/srv/debian":              "",
+		"https://deb.debian.org/debian": "",
+	} {
+		if got := aptMirrorListPath(uri); got != want {
+			t.Errorf("%s = %q, want %q", uri, got, want)
+		}
+	}
+}
+
+func TestParseAptMirrorList(t *testing.T) {
+	list := "# Debian's CDN\n" +
+		"https://cdn-aws.deb.debian.org/debian\tpriority:1\n" +
+		"\n" +
+		"  http://ci:s3cret@mirror.example.test/debian?token=hunter2\ttype:deb\n" +
+		"https://cdn-aws.deb.debian.org/debian\n" +
+		"mirror+file:/etc/apt/mirrors/other.list\n" +
+		"machine mirror.example.test login ci password s3cret\n" +
+		"file:/srv/debian\r\n"
+	want := []string{"https://cdn-aws.deb.debian.org/debian", "http://mirror.example.test/debian", "file:/srv/debian"}
+	if got := parseAptMirrorList([]byte(list)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("mirrors = %#v, want %#v", got, want)
+	}
+	var long strings.Builder
+	for index := range maximumMirrorURIs + 5 {
+		fmt.Fprintf(&long, "https://mirror%d.example.test/debian\n", index)
+	}
+	if got := parseAptMirrorList([]byte(long.String())); len(got) != maximumMirrorURIs {
+		t.Fatalf("%d mirrors reported, want %d", len(got), maximumMirrorURIs)
+	}
+}
+
+// TestAptMirrorFileRepositories follows the mirror lists of Debian's cloud
+// images, so the backend can tell whose archive the repository is.
+func TestAptMirrorFileRepositories(t *testing.T) {
+	file := func(data string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(data)} }
+	fsys := fstest.MapFS{
+		"etc/apt/sources.list.d/debian.sources": file(`Types: deb deb-src
+URIs: mirror+file:///etc/apt/mirrors/debian.list
+Suites: trixie trixie-updates
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: mirror+file:///etc/apt/mirrors/debian-security.list
+Suites: trixie-security
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: mirror+file:///etc/apt/mirrors/missing.list
+Suites: trixie-backports
+Components: main
+
+Types: deb
+URIs: mirror+file:///etc/apt/auth.conf
+Suites: trixie-proposed-updates
+Components: main
+`),
+		"etc/apt/mirrors/debian.list":          file("https://deb.debian.org/debian\n"),
+		"etc/apt/mirrors/debian-security.list": file("https://deb.debian.org/debian-security\n"),
+		"etc/apt/auth.conf":                    file("machine https://deb.debian.org/debian login ci password s3cret\n"),
+	}
+	recording := &recordingFS{FS: fsys}
+	host := &Host{FS: recording}
+	got := map[string][]string{}
+	for _, repository := range host.configuredRepositories(ManagerApt) {
+		got[repository.Type+" "+repository.Suite] = repository.URIs
+		if repository.Transport != "mirror" {
+			t.Errorf("%s transport = %s", repository.ID, repository.Transport)
+		}
+	}
+	want := map[string][]string{
+		"deb trixie":                  {"mirror+file:///etc/apt/mirrors/debian.list", "https://deb.debian.org/debian"},
+		"deb trixie-updates":          {"mirror+file:///etc/apt/mirrors/debian.list", "https://deb.debian.org/debian"},
+		"deb-src trixie":              {"mirror+file:///etc/apt/mirrors/debian.list", "https://deb.debian.org/debian"},
+		"deb-src trixie-updates":      {"mirror+file:///etc/apt/mirrors/debian.list", "https://deb.debian.org/debian"},
+		"deb trixie-security":         {"mirror+file:///etc/apt/mirrors/debian-security.list", "https://deb.debian.org/debian-security"},
+		"deb trixie-backports":        {"mirror+file:///etc/apt/mirrors/missing.list"},
+		"deb trixie-proposed-updates": {"mirror+file:///etc/apt/auth.conf"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("uris = %#v\nwant %#v", got, want)
+	}
+	for _, name := range recording.opened {
+		if strings.Contains(name, "auth.conf") {
+			t.Errorf("opened %s", name)
+		}
+	}
+}
+
 func TestAptIndexMatcher(t *testing.T) {
 	entry := func(uri, suite string, components ...string) aptEntry {
 		return aptEntry{kind: RepositoryDeb, uri: uri, suite: suite, components: components, enabled: true}

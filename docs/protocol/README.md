@@ -245,7 +245,7 @@ The field names inside each payload are defined by the agent's collectors (`coll
   - rpm: the repo id from its `.repo` section
 - **`file`:** the defining file, e.g. `/etc/apt/sources.list.d/php.list` or `/etc/yum.repos.d/remi.repo`.
 - **`type`:** `deb`, `deb-src` or `rpm`. **`enabled`:** bool.
-- **`uris`:** the configured URIs: apt `URIs`, rpm `baseurl`, or `mirrorlist`/`metalink` (marked with a `mirrorlist:`/`metalink:` prefix). Credentials in URIs (`user:pass@`) are **stripped** by the agent, as are query strings, except these non-secret parameters on `mirrorlist`/`metalink` URIs: `repo`, `arch`, `country`, `protocol`, `content`, `infra`, `release`. Those identify the repository, e.g. `metalink?repo=epel-9&arch=$basearch`.
+- **`uris`:** the configured URIs: apt `URIs`, rpm `baseurl`, or `mirrorlist`/`metalink` (marked with a `mirrorlist:`/`metalink:` prefix). A `mirror+file:` URI, such as `mirror+file:///etc/apt/mirrors/debian.list` on Debian's cloud images, is followed by the mirrors its list names (at most 10, from agent 0.7.2), so the backend can classify it; the configured URI stays first. Credentials in URIs (`user:pass@`) are **stripped** by the agent, as are query strings, except these non-secret parameters on `mirrorlist`/`metalink` URIs: `repo`, `arch`, `country`, `protocol`, `content`, `infra`, `release`. Those identify the repository, e.g. `metalink?repo=epel-9&arch=$basearch`.
 - **Suite and naming:** `suite` and `components` (apt), or `name` (rpm).
 - **`signing`:** `{ "signed_by": path|fingerprint|null, "trusted": bool, "gpgcheck": bool|null }`.
   - apt `[trusted=yes]` / `Trusted: yes` → `trusted: true`, meaning signatures are not checked.

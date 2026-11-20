@@ -39,8 +39,8 @@ type Repository struct {
 	Type    string `json:"type"`
 	Enabled bool   `json:"enabled"`
 	// URIs are the configured URIs without credentials or query strings:
-	// apt's URI, or rpm's baseurls followed by a "mirrorlist:" or
-	// "metalink:" URI.
+	// apt's URI, followed by the mirrors of a mirror+file: list, or rpm's
+	// baseurls followed by a "mirrorlist:" or "metalink:" URI.
 	URIs []string `json:"uris"`
 	// Suite and Components are apt's; Name is rpm's.
 	Suite      string            `json:"suite,omitempty"`
@@ -66,8 +66,9 @@ type RepositorySigning struct {
 	GPGCheck *bool `json:"gpgcheck"`
 }
 
-// Repository source locations. Nothing else under /etc/apt is read: in
-// particular never auth.conf or auth.conf.d, which hold credentials.
+// Repository source locations. Nothing else under /etc/apt is read, apart
+// from the mirror lists of mirror+file: URIs: in particular never
+// auth.conf or auth.conf.d, which hold credentials.
 var (
 	aptSourcesList  = "/etc/apt/sources.list"
 	aptSourcesParts = "/etc/apt/sources.list.d"
