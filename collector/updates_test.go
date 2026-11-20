@@ -42,9 +42,11 @@ func TestAptUpdatesUbuntu1604(t *testing.T) {
 	}, map[string]fakeCommand{"apt-get -s -q -o Debug::NoLocking=1 -o Dir::Bin::ischroot=/bin/false dist-upgrade": {file: "apt-get-dist-upgrade.txt"}})
 	info := collectUpdates(t, host)
 
+	// The fixture's list belongs to no configured source, so no repository
+	// offers the candidates.
 	want := []Update{
-		{Name: "base-files", CurrentVersion: "9.4ubuntu4.13", CandidateVersion: "9.4ubuntu4.14", Arch: "arm64"},
-		{Name: "libapparmor1", CurrentVersion: "2.10.95-0ubuntu2.11", CandidateVersion: "2.10.95-0ubuntu2.12", Arch: "arm64", Security: true},
+		{Name: "base-files", CurrentVersion: "9.4ubuntu4.13", CandidateVersion: "9.4ubuntu4.14", Arch: "arm64", Origins: []string{}},
+		{Name: "libapparmor1", CurrentVersion: "2.10.95-0ubuntu2.11", CandidateVersion: "2.10.95-0ubuntu2.12", Arch: "arm64", Security: true, Origins: []string{}},
 	}
 	if info.Manager != ManagerApt || !reflect.DeepEqual(info.Items, want) || info.SecurityCount != 1 {
 		t.Fatalf("info = %+v", info)
@@ -79,7 +81,7 @@ func TestAptUpdatesDebian12(t *testing.T) {
 	if len(info.Items) != 45 {
 		t.Fatalf("%d updates", len(info.Items))
 	}
-	if got := findUpdate(info, "perl-base"); got != (Update{Name: "perl-base", CurrentVersion: "5.36.0-7", CandidateVersion: "5.36.0-7+deb12u4", Arch: "arm64", Security: true}) {
+	if got := findUpdate(info, "perl-base"); !reflect.DeepEqual(got, Update{Name: "perl-base", CurrentVersion: "5.36.0-7", CandidateVersion: "5.36.0-7+deb12u4", Arch: "arm64", Security: true}) {
 		t.Fatalf("perl-base = %+v", got)
 	}
 	if got := findUpdate(info, "bsdutils"); got.CurrentVersion != "1:2.38.1-5+b1" || got.Security {
@@ -125,7 +127,7 @@ func TestYumUpdatesCentOS7(t *testing.T) {
 	if info.Manager != ManagerYum || len(info.Items) != 51 || info.SecurityCount != 0 {
 		t.Fatalf("manager %s, %d items, %d security", info.Manager, len(info.Items), info.SecurityCount)
 	}
-	if got := findUpdate(info, "bind-license"); got != (Update{Name: "bind-license", CurrentVersion: "32:9.11.4-26.P2.el7", CandidateVersion: "32:9.11.4-26.P2.el7_9.16", Arch: "noarch"}) {
+	if got := findUpdate(info, "bind-license"); !reflect.DeepEqual(got, Update{Name: "bind-license", CurrentVersion: "32:9.11.4-26.P2.el7", CandidateVersion: "32:9.11.4-26.P2.el7_9.16", Arch: "noarch"}) {
 		t.Fatalf("bind-license = %+v", got)
 	}
 	if info.RebootRequired == nil || *info.RebootRequired {
@@ -153,6 +155,7 @@ func TestDnfUpdatesAlmaLinux9(t *testing.T) {
 		"usr/bin/needs-restarting": "",
 		"var/lib/rpm/rpmdb.sqlite": "",
 		"var/cache/dnf/baseos-09b2e93483836b7c/repodata/repomd.xml": "",
+		"etc/yum.repos.d/almalinux-baseos.repo":                     "[baseos]\nname=AlmaLinux $releasever - BaseOS\nmirrorlist=https://mirrors.almalinux.org/mirrorlist/$releasever/baseos\n",
 	}
 	host, _ := fakeHost(t, "almalinux-9", files, map[string]fakeCommand{
 		"dnf -C -q --setopt=exit_on_lock=True check-update":               {file: "check-update.txt", exit: 100},
@@ -164,7 +167,7 @@ func TestDnfUpdatesAlmaLinux9(t *testing.T) {
 	if info.Manager != ManagerDnf || len(info.Items) != 13 || info.SecurityCount != 10 {
 		t.Fatalf("manager %s, %d items, %d security", info.Manager, len(info.Items), info.SecurityCount)
 	}
-	if got := findUpdate(info, "openssl-libs"); got != (Update{Name: "openssl-libs", CurrentVersion: "1:3.5.8-1.el9_8", CandidateVersion: "1:3.5.8-2.el9_8", Arch: "aarch64", Security: true}) {
+	if got := findUpdate(info, "openssl-libs"); !reflect.DeepEqual(got, Update{Name: "openssl-libs", CurrentVersion: "1:3.5.8-1.el9_8", CandidateVersion: "1:3.5.8-2.el9_8", Arch: "aarch64", Security: true, Origins: []string{"baseos"}}) {
 		t.Fatalf("openssl-libs = %+v", got)
 	}
 	if got := findUpdate(info, "gnutls"); got.Security {
@@ -202,8 +205,8 @@ grub2.x86_64                      1:2.02-0.87.el7.centos.14      updates
     grub2.x86_64                  1:2.02-0.86.el7.centos         @anaconda
 `
 	want := []Update{
-		{Name: "kernel", Arch: "x86_64", CandidateVersion: "3.10.0-1160.119.1.el7"},
-		{Name: "a-very-long-package-name-that-wraps", Arch: "noarch", CandidateVersion: "1.2-3.el7"},
+		{Name: "kernel", Arch: "x86_64", CandidateVersion: "3.10.0-1160.119.1.el7", repository: "updates"},
+		{Name: "a-very-long-package-name-that-wraps", Arch: "noarch", CandidateVersion: "1.2-3.el7", repository: "epel"},
 	}
 	if got := parseCheckUpdate([]byte(output)); !reflect.DeepEqual(got, want) {
 		t.Fatalf("parsed = %+v", got)
@@ -365,5 +368,70 @@ func TestRebootRequiredIsUnknownOnRHELWithoutNeedsRestarting(t *testing.T) {
 	host, _ := fakeHost(t, "almalinux-9", map[string]string{"var/lib/rpm/rpmdb.sqlite": ""}, nil)
 	if required := host.RebootRequired(context.Background()); required != nil {
 		t.Fatalf("required = %v", *required)
+	}
+}
+
+func TestAptUpdateOriginsFromTheSharedIndex(t *testing.T) {
+	_, recording, host := aptOriginsHost(t)
+	simulation := "Inst openssl [3.0.11-1~deb12u1] (3.0.16-1~deb12u1 Debian-Security:12/stable-security [amd64])\n" +
+		"Inst coreutils [9.1-1] (9.4-1+sury packages.sury.org [amd64])\n" +
+		"Inst local-tool [0.1] (0.2 old.example.test [amd64])\n"
+	host.Command = func(_ context.Context, name string, args ...string) (CommandResult, error) {
+		if name == "apt-get" {
+			return CommandResult{Stdout: []byte(simulation)}, nil
+		}
+		return CommandResult{ExitCode: 1}, nil
+	}
+	origins := NewOrigins(host)
+	payload, err := NewRepositories(host, origins).Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repositories := payload.(*RepositoriesInfo)
+	security := findRepository(t, repositories, "http://deb.debian.org/debian-security", "bookworm-security")
+	sury := findRepository(t, repositories, "https://packages.sury.org/php/", "bookworm")
+
+	opened := len(recording.opened)
+	payload, err = NewUpdatesWithOrigins(host, origins).Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := payload.(*UpdatesInfo)
+	want := map[string][]string{
+		"openssl":    {security.ID}, // the installed version is gone, the candidate is in the security archive
+		"coreutils":  {sury.ID},     // Sury's build replaces the distribution's
+		"local-tool": {},            // no configured repository offers the candidate
+	}
+	for name, ids := range want {
+		if got := findUpdate(info, name).Origins; !reflect.DeepEqual(got, ids) {
+			t.Errorf("%s origins = %#v, want %#v", name, got, ids)
+		}
+	}
+	for _, name := range recording.opened[opened:] {
+		if strings.Contains(name, "_Packages") {
+			t.Fatalf("lists read again for updates: %s", name)
+		}
+	}
+	wire, _ := json.Marshal(findUpdate(info, "local-tool"))
+	if !strings.Contains(string(wire), `"origins":[]`) || strings.Contains(string(wire), "repository") {
+		t.Errorf("wire = %s", wire)
+	}
+}
+
+func TestAptUpdateOriginsLeftOutWhenUndetermined(t *testing.T) {
+	// Before the first apt-get update there are no lists to tell.
+	fsys, _, host := aptOriginsHost(t)
+	for name := range fsys {
+		if strings.Contains(name, "_Packages") {
+			delete(fsys, name)
+		}
+	}
+	host.Command = func(_ context.Context, name string, args ...string) (CommandResult, error) {
+		return CommandResult{Stdout: []byte("Inst openssl [3.0.11-1~deb12u1] (3.0.16-1~deb12u1 Debian-Security:12/stable-security [amd64])\n")}, nil
+	}
+	info := collectUpdates(t, host)
+	wire, _ := json.Marshal(info.Items[0])
+	if info.Items[0].Origins != nil || strings.Contains(string(wire), "origins") {
+		t.Fatalf("wire = %s", wire)
 	}
 }

@@ -69,11 +69,11 @@ func Default(host *Host) *Registry {
 	registry.MustRegister(NewNetwork(host))
 	registry.MustRegister(NewResolvers(host))
 	registry.MustRegister(NewStorage(host))
-	// packages and repositories share the package origins.
+	// packages, repositories and updates share the package origins.
 	origins := NewOrigins(host)
 	registry.MustRegisterOptional(NewPackagesWithOrigins(host, origins))
 	registry.MustRegisterOptional(NewRepositories(host, origins))
-	registry.MustRegisterOptional(NewUpdates(host))
+	registry.MustRegisterOptional(NewUpdatesWithOrigins(host, origins))
 	registry.MustRegisterOptional(NewCloud(host))
 	vhosts := NewVHosts(host)
 	registry.MustRegisterOptional(vhosts)

@@ -42,6 +42,14 @@ type Update struct {
 	CandidateVersion string `json:"candidate_version"`
 	Arch             string `json:"arch"`
 	Security         bool   `json:"security"`
+	// Origins are the sorted ids of the repositories (the repositories
+	// dataset) that offer the candidate version. Empty means none of the
+	// configured ones does; nil, which is left out, means it could not be
+	// determined.
+	Origins []string `json:"origins,omitzero"`
+
+	// repository is the repository yum or dnf names for the candidate.
+	repository string
 }
 
 // Normalize sorts items by name and arch.
@@ -60,10 +68,21 @@ func (info *UpdatesInfo) Normalize() {
 // while one holds its lock, Collect returns a BusyError so the previous
 // dataset is kept.
 type Updates struct {
-	host *Host
+	host    *Host
+	origins *Origins
 }
 
-func NewUpdates(host *Host) *Updates { return &Updates{host: host} }
+// NewUpdates returns the collector with a private origin resolver.
+func NewUpdates(host *Host) *Updates { return NewUpdatesWithOrigins(host, nil) }
+
+// NewUpdatesWithOrigins returns the collector sharing origins with the
+// packages and repositories collectors; nil uses a private one.
+func NewUpdatesWithOrigins(host *Host, origins *Origins) *Updates {
+	if origins == nil {
+		origins = NewOrigins(host)
+	}
+	return &Updates{host: host, origins: origins}
+}
 
 func (*Updates) Name() string { return "updates" }
 
@@ -101,6 +120,9 @@ func (collector *Updates) Collect(ctx context.Context) (any, error) {
 	var err error
 	if manager == ManagerApt {
 		info, err = host.aptUpdates(ctx)
+		if err == nil {
+			err = collector.applyAptOrigins(ctx, info)
+		}
 	} else {
 		info, err = host.rpmUpdates(ctx, manager)
 	}
@@ -117,6 +139,22 @@ func (collector *Updates) Collect(ctx context.Context) (any, error) {
 	}
 	info.Normalize()
 	return info, nil
+}
+
+// applyAptOrigins sets the repositories offering each candidate from the
+// shared origin index, which already read every Packages list. They are
+// left out when the index is undetermined.
+func (collector *Updates) applyAptOrigins(ctx context.Context, info *UpdatesInfo) error {
+	index, err := collector.origins.resolve(ctx)
+	if err != nil {
+		return err
+	}
+	for position, item := range info.Items {
+		if ids, determined := index.offering(item.Name, item.Arch, item.CandidateVersion); determined {
+			info.Items[position].Origins = ids
+		}
+	}
+	return nil
 }
 
 // aptInstPattern matches the "Inst" lines of an apt-get simulation:
@@ -291,11 +329,25 @@ func (host *Host) rpmUpdates(ctx context.Context, manager string) (*UpdatesInfo,
 		return nil, err
 	}
 
+	// check-update names the repository of each candidate; only configured
+	// ones count, and without any readable .repo file it cannot be told.
+	configured := map[string]bool{}
+	for _, repository := range host.rpmRepositories(manager) {
+		configured[repository.ID] = true
+	}
+
 	info := &UpdatesInfo{Manager: manager, Items: []Update{}}
 	for _, available := range parseCheckUpdate(result.Stdout) {
 		key := available.Name + "." + available.Arch
 		available.CurrentVersion = current[key]
 		available.Security = security[key]
+		if len(configured) > 0 {
+			available.Origins = []string{}
+			if configured[available.repository] {
+				available.Origins = []string{available.repository}
+			}
+		}
+		available.repository = ""
 		info.Items = append(info.Items, available)
 	}
 	info.RebootRequired = host.needsRestarting(ctx)
@@ -325,7 +377,7 @@ func parseCheckUpdate(data []byte) []Update {
 		}
 		name, arch, ok := cutLast(fields[0], ".")
 		if ok && name != "" {
-			updates = append(updates, Update{Name: name, Arch: arch, CandidateVersion: fields[1]})
+			updates = append(updates, Update{Name: name, Arch: arch, CandidateVersion: fields[1], repository: fields[2]})
 		}
 		fields = nil
 	}

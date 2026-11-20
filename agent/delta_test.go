@@ -385,16 +385,16 @@ func TestCertificatesDeltaReproducesHashOnTheBackend(t *testing.T) {
 }
 
 // TestRepositoriesFixtureMatchesCollectorTypes decodes the spec's
-// repositories payload, and the packages payload whose origins refer to
-// it, into the collector types: re-encoding must reproduce the fixture
-// hashes, every origin must name a repository and each repository's
-// packages count must match the origins.
+// repositories payload, and the packages and updates payloads whose origins
+// refer to it, into the collector types: re-encoding must reproduce the
+// fixture hashes, every origin must name a repository and each repository's
+// packages count must match the packages' origins.
 func TestRepositoriesFixtureMatchesCollectorTypes(t *testing.T) {
 	var envelope inventory.Envelope
 	if err := json.Unmarshal(readFixture(t, "inventory-repositories-request.json"), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	targets := map[string]any{"repositories": &collector.RepositoriesInfo{}, "packages": &collector.PackagesInfo{}}
+	targets := map[string]any{"repositories": &collector.RepositoriesInfo{}, "packages": &collector.PackagesInfo{}, "updates": &collector.UpdatesInfo{}}
 	for name, target := range targets {
 		dataset, ok := envelope.Datasets[name]
 		if !ok || dataset.Mode != inventory.ModeFull {
@@ -446,6 +446,20 @@ func TestRepositoriesFixtureMatchesCollectorTypes(t *testing.T) {
 	for id := range counts {
 		if !ids[id] {
 			t.Errorf("origin %s names no repository", id)
+		}
+	}
+	updates := targets["updates"].(*collector.UpdatesInfo)
+	if len(updates.Items) == 0 {
+		t.Fatal("the fixture has no pending update")
+	}
+	for _, item := range updates.Items {
+		if item.Origins == nil || !slices.IsSorted(item.Origins) {
+			t.Errorf("update %s: origins %v left out or not sorted", item.Name, item.Origins)
+		}
+		for _, id := range item.Origins {
+			if !ids[id] {
+				t.Errorf("update %s: origin %s names no repository", item.Name, id)
+			}
 		}
 	}
 }

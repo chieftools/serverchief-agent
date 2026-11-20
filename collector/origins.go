@@ -16,10 +16,11 @@ import (
 	"sync"
 )
 
-// Origins finds the repositories that offer each installed package. The
-// packages and repositories collectors share one instance, so the apt
-// lists are read (or dnf is asked) once per change of the package
-// database, the sources or the lists.
+// Origins finds the repositories that offer each installed package, and on
+// apt also the other versions of installed packages, such as the candidate
+// of a pending update. The packages, repositories and updates collectors
+// share one instance, so the apt lists are read (or dnf is asked) once per
+// change of the package database, the sources or the lists.
 type Origins struct {
 	host *Host
 
@@ -40,6 +41,20 @@ type originIndex struct {
 	// byPackage maps name/arch to the sorted ids of the repositories that
 	// offer the installed version. Packages without an entry have none.
 	byPackage map[string][]string
+	// byVersion maps name/arch/version to the sorted ids of the
+	// repositories that offer that version of an installed package (apt
+	// only, nil on rpm). Versions without an entry are offered by none.
+	byVersion map[string][]string
+}
+
+// offering returns the sorted ids of the repositories that offer a version
+// of an installed package, and false when that cannot be told: the index
+// is undetermined or was not built from the apt lists.
+func (index *originIndex) offering(name, arch, version string) ([]string, bool) {
+	if !index.determined || index.byVersion == nil {
+		return nil, false
+	}
+	return append([]string{}, index.byVersion[name+"/"+arch+"/"+version]...), true
 }
 
 // apply sets the origins of items; nothing when undetermined.
@@ -240,7 +255,7 @@ func (host *Host) aptOrigins(ctx context.Context) (*originIndex, error) {
 	for _, item := range collapsePackages(parseDpkgStatus(data), compareDebianVersions) {
 		installed[item.Name] = append(installed[item.Name], installedVersion{item.Arch, item.Version})
 	}
-	index := &originIndex{determined: true, byPackage: map[string][]string{}}
+	index := &originIndex{determined: true, byPackage: map[string][]string{}, byVersion: map[string][]string{}}
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -250,9 +265,18 @@ func (host *Host) aptOrigins(ctx context.Context) (*originIndex, error) {
 			if !found {
 				return
 			}
-			for _, candidate := range versions {
-				if candidate.arch == string(arch) && candidate.version == string(version) {
-					key := string(name) + "/" + candidate.arch
+			for _, current := range versions {
+				if current.arch != string(arch) {
+					continue
+				}
+				// Every version of an installed package, so the candidate
+				// of a pending update finds its repositories too.
+				versionKey := string(name) + "/" + current.arch + "/" + string(version)
+				for _, id := range file.ids {
+					index.byVersion[versionKey] = appendUnique(index.byVersion[versionKey], id)
+				}
+				if current.version == string(version) {
+					key := string(name) + "/" + current.arch
 					for _, id := range file.ids {
 						index.byPackage[key] = appendUnique(index.byPackage[key], id)
 					}
@@ -265,6 +289,9 @@ func (host *Host) aptOrigins(ctx context.Context) (*originIndex, error) {
 	}
 	for key := range index.byPackage {
 		slices.Sort(index.byPackage[key])
+	}
+	for key := range index.byVersion {
+		slices.Sort(index.byVersion[key])
 	}
 	return index, nil
 }

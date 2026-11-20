@@ -9,6 +9,10 @@ release.
 
 ## [Unreleased]
 
+### Added
+
+- Pending updates now say which repositories offer the new version (protocol 1.5.0). PPAs such as `ppa:ondrej/php` and the distributions' security pockets only list their newest version, so once an update is published the installed version seemed to come from no repository at all. Server Chief now keeps showing where such a package comes from, and keeps third-party packages, such as Sury's, out of the distribution's security advisories while their update is pending. On apt the versions are looked up in the package lists the agent already reads for package origins, on yum and dnf they come from `check-update`.
+
 ## [0.7.0]
 
 ### Changed

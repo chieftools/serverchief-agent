@@ -1,6 +1,6 @@
 # Server Chief agent protocol v1
 
-Revision **1.4.0**. This document is the contract between the Server Chief control plane and the `serverchief` agent in this repository. Both sides test against the fixtures in [`fixtures/`](fixtures/); the agent's tests replay them from here, and the control plane keeps a copy.
+Revision **1.5.0**. This document is the contract between the Server Chief control plane and the `serverchief` agent in this repository. Both sides test against the fixtures in [`fixtures/`](fixtures/); the agent's tests replay them from here, and the control plane keeps a copy.
 
 Revision 1.0.0 was refined in place until the first production deploy. Since then, additive changes bump the minor revision and incompatible changes need `/agent/v2`. Both sides accept every revision of the same major.
 
@@ -11,6 +11,8 @@ Revision 1.0.0 was refined in place until the first production deploy. Since the
 **Changes in 1.3.0** (agent 0.5.0): a `reboot` sends the output of scheduling it as live output right away, instead of only with its result after the server is back, and the result's `output` ends with a `# ` line on how the reboot went (see *Live output* and *Reboots*).
 
 **Changes in 1.4.0** (agent 0.7.0): `refresh_inventory` takes `refresh_metadata` and, unless it is `false`, refreshes the package metadata before it collects `updates` and `repositories`, so it reports updates that were published since the last scheduled refresh (see *Commands* and *Package metadata refresh and package activity*). Its result can carry a `detail` when it succeeded, explaining package lists that were not refreshed.
+
+**Changes in 1.5.0** (agent 0.8.0): `updates` items gain `origins`, the `repositories` ids that offer the candidate version, so the backend knows where a pending update comes from while repositories that only list their newest version (PPAs, security pockets) no longer offer the installed one (see *Inventory*).
 
 The design follows the Backup Chief agent protocol:
 
@@ -191,7 +193,11 @@ The field names inside each payload are defined by the agent's collectors (`coll
     - rpm: dnf `repoquery --installed --qf '%{name}\t%{arch}\t%{from_repo}'`, or yum `yumdb`/`yum list installed` on EL7.
     - An empty list means no configured repository offers that version: manually installed `.deb`/`.rpm` files, removed repositories, or versions superseded and gone from the mirror.
     - The field is omitted when origins could not be determined at all, e.g. there are no index files yet.
-- `updates`: `{ "manager": "apt" | "yum" | "dnf", "items": [{ "name", "current_version", "candidate_version", "arch", "security" }], "security_count", "reboot_required": bool | null, "cache_updated_at": RFC 3339 | null }`.
+- `updates`: `{ "manager": "apt" | "yum" | "dnf", "items": [{ "name", "current_version", "candidate_version", "arch", "security", "origins"? }], "security_count", "reboot_required": bool | null, "cache_updated_at": RFC 3339 | null }`.
+  - `origins` (1.5.0, optional, sorted) lists the `repositories` ids that offer the candidate version. PPAs and security pockets only list their newest version, so once an update is published the installed version's `origins` are often empty; these tell where the update, and the package, come from.
+    - apt: the candidate's name, version and arch matched against the same `*_Packages` index files as the packages' `origins`, from the same shared index.
+    - yum/dnf: the repository `check-update` names for the candidate, when it is a configured one.
+    - An empty list means none of the configured repositories offers it. The field is omitted when it cannot be determined (no index files yet, no readable `.repo` file); older agents never send it.
   - `cache_updated_at` is the mtime of the package manager's metadata cache. The agent refreshes that cache itself when `package_metadata_refresh` is enabled (see *Config*). It never installs, upgrades or removes packages.
   - `reboot_required` is `null` when it cannot be determined.
   - `updates` is a full dataset, so its hash only changes when the update list, the cache timestamp or the reboot flag change.

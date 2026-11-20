@@ -262,6 +262,38 @@
         ],
         "manager": "apt"
       }
+    },
+    "updates": {
+      "hash": "9bc4b2e9389bdf7cb47168f98644bd8d7618f169356f3010d611d48c3a15f223",
+      "mode": "full",
+      "payload": {
+        "cache_updated_at": "2026-10-24T11:00:00Z",
+        "items": [
+          {
+            "arch": "amd64",
+            "candidate_version": "8.3.13-1+0~20241025.44+debian12~1.gbp0a1b2c",
+            "current_version": "8.3.12-1+0~20240927.43+debian12~1.gbpad3b8c",
+            "name": "php8.3-cli",
+            "origins": [
+              "bookworm:c4a17d93"
+            ],
+            "security": false
+          },
+          {
+            "arch": "all",
+            "candidate_version": "2024b-0+deb12u1",
+            "current_version": "2024a-0+deb12u1",
+            "name": "tzdata",
+            "origins": [
+              "bookworm-updates:8b3d4e07"
+            ],
+            "security": false
+          }
+        ],
+        "manager": "apt",
+        "reboot_required": false,
+        "security_count": 0
+      }
     }
   },
   "seq": 7
