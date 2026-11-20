@@ -9,6 +9,8 @@ release.
 
 ## [Unreleased]
 
+## [0.7.2]
+
 ### Fixed
 
 - Repositories that use apt's mirror method with a local list, such as `mirror+file:///etc/apt/mirrors/debian.list` on Debian's cloud images, now report the mirrors that list names. Server Chief could not tell whose archive they were, so it showed them as an unknown third-party vendor and did not check the distribution's packages from them against security advisories.
@@ -214,7 +216,8 @@ release.
 - Added self-updates from the Server Chief package repository. Only the `serverchief` package is installed, and an update that does not report ready is rolled back. See [Agent updates](README.md#agent-updates).
 - Added signed apt and yum/dnf repositories, with an `install.sh` that configures them under the names the updater expects. See [Releasing](README.md#releasing).
 
-[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/chieftools/serverchief-agent/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.7.2
 [0.7.1]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.7.1
 [0.7.0]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.7.0
 [0.6.5]: https://github.com/chieftools/serverchief-agent/releases/tag/v0.6.5
